@@ -10,7 +10,7 @@ save their CSV data inside this folder.
  **Install dependencies:**
    ```bash
    # Recommended: Use a virtual environment
-   python -m venv venv
+   python3 -m venv venv
    source venv/bin/activate  # On Windows: venv\Scripts\activate
    
    pip install -r requirements.txt
@@ -19,19 +19,19 @@ save their CSV data inside this folder.
 **Processing Portfolio:**
    ```bash
    # ALWAYS include a CSV file of history
-   python trading_script.py --file "Start Your Own/chatgpt_portfolio_update.csv"
+   python3 trading_script.py --file "Start Your Own/chatgpt_portfolio_update.csv"
    ```
 
 **To Save Prior Days:**
    ```bash
 
    # Save data with specific date
-   python trading_script.py --asof 2025-08-27 --file "Start Your Own/chatgpt_portfolio_update.csv"
+   python3 trading_script.py --asof 2025-08-27 --file "Start Your Own/chatgpt_portfolio_update.csv"
    ```
 
 **Generate performance graphs:**
    ```bash
-   python "Start Your Own/Generate_Graph.py"
+   python3 "Start Your Own/Generate_Graph.py"
    ```
 
 ### Argument Table for 'Generate_Graph.py'
@@ -69,7 +69,7 @@ This script draws a graph of your portfolio versus the S&P 500.
    - Run `ProcessPortfolio.py` at least once so `chatgpt_portfolio_update.csv` has data.
 2. **Run the graph script**
    ```bash
-   python "Start Your Own/Generate_Graph.py" --start-equity 100
+   python3 "Start Your Own/Generate_Graph.py" --start-equity 100
    ```
    
 3. **View the chart**
