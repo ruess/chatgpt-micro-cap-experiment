@@ -216,12 +216,15 @@ def _yahoo_download(ticker: str, **kwargs: Any) -> pd.DataFrame:
     """Call yfinance.download with a real UA and silence all chatter."""
     import io, logging, requests
     from contextlib import redirect_stderr, redirect_stdout
-
-    sess = requests.Session()
-    sess.headers.update({"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"})
+    
+    # Remove the custom session creation that conflicts with yfinance's internal requirements.
+    #sess = requests.Session()
+    #sess.headers.update({"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"})
+    #kwargs.setdefault("session", sess)
+    
     kwargs.setdefault("progress", False)
     kwargs.setdefault("threads", False)
-    kwargs.setdefault("session", sess)
+
 
     logging.getLogger("yfinance").setLevel(logging.CRITICAL)
     buf = io.StringIO()
@@ -230,7 +233,11 @@ def _yahoo_download(ticker: str, **kwargs: Any) -> pd.DataFrame:
         try:
             with redirect_stdout(buf), redirect_stderr(buf):
                 df = cast(pd.DataFrame, yf.download(ticker, **kwargs))
-        except Exception:
+                # Added improved debugging for exceptions vs. "No data for [symbol] (source=empty)." 
+                except Exception as exc:
+                    print(f"ERROR: yfinance download failed for {ticker} with arguments {kwargs}: {exc}", file=sys.stderr)
+                    import traceback
+                    traceback.print_exc(file=sys.stderr)
             return pd.DataFrame()
     return df if isinstance(df, pd.DataFrame) else pd.DataFrame()
 
