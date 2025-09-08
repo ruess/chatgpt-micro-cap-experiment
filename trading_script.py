@@ -447,7 +447,7 @@ Would you like to log a manual trade? Enter 'b' for buy, 's' for sell, or press 
                         print(f"MOO buy for {ticker} failed: no market data available (source={fetch.source}).")
                         continue
 
-                    o = float(data["Open"].iloc[-1]) if "Open" in data else float(data["Close"].iloc[-1])
+                    o = data["Open"].iloc[-1].item() if "Open" in data else data["Close"].iloc[-1].item()
                     exec_price = round(o, 2)
                     notional = exec_price * shares
                     if notional > cash:
@@ -562,10 +562,10 @@ Would you like to log a manual trade? Enter 'b' for buy, 's' for sell, or press 
             results.append(row)
             continue
 
-        o = float(data["Open"].iloc[-1]) if "Open" in data else np.nan
-        h = float(data["High"].iloc[-1])
-        l = float(data["Low"].iloc[-1])
-        c = float(data["Close"].iloc[-1])
+        o = data["Open"].iloc[-1].item() if "Open" in data else np.nan
+        h = data["High"].iloc[-1].item()
+        l = data["Low"].iloc[-1].item()
+        c = data["Close"].iloc[-1].item()
         if np.isnan(o):
             o = c
 
@@ -687,11 +687,11 @@ def log_manual_buy(
         print(f"Manual buy for {ticker} failed: no market data available (source={fetch.source}).")
         return cash, chatgpt_portfolio
 
-    o = float(data.get("Open", [np.nan])[-1])
-    h = float(data["High"].iloc[-1])
-    l = float(data["Low"].iloc[-1])
+    o = data.get("Open", pd.Series([np.nan])).iloc[-1].item()
+    h = data["High"].iloc[-1].item()
+    l = data["Low"].iloc[-1].item()
     if np.isnan(o):
-        o = float(data["Close"].iloc[-1])
+        o = data["Close"].iloc[-1].item()
 
     if o <= buy_price:
         exec_price = o
@@ -799,11 +799,11 @@ If this is a mistake, enter 1. """
         print(f"Manual sell for {ticker} failed: no market data available (source={fetch.source}).")
         return cash, chatgpt_portfolio
 
-    o = float(data["Open"].iloc[-1]) if "Open" in data else np.nan
-    h = float(data["High"].iloc[-1])
-    l = float(data["Low"].iloc[-1])
+    o = data["Open"].iloc[-1].item() if "Open" in data else np.nan
+    h = data["High"].iloc[-1].item()
+    l = data["Low"].iloc[-1].item()
     if np.isnan(o):
-        o = float(data["Close"].iloc[-1])
+        o = data["Close"].iloc[-1].item()
 
     if o >= sell_price:
         exec_price = o
@@ -877,9 +877,9 @@ def daily_results(chatgpt_portfolio: pd.DataFrame, cash: float) -> None:
                 rows.append([ticker, "—", "—", "—"])
                 continue
 
-            price = float(data["Close"].iloc[-1])
-            last_price = float(data["Close"].iloc[-2])
-            volume = float(data["Volume"].iloc[-1])
+            price = float(data["Close"].iloc[-1].item())
+            last_price = float(data["Close"].iloc[-2].item())
+            volume = float(data["Volume"].iloc[-1].item())
 
             percent_change = ((price - last_price) / last_price) * 100
             rows.append([ticker, f"{price:,.2f}", f"{percent_change:+.2f}%", f"{int(volume):,}"])
@@ -1020,8 +1020,8 @@ def daily_results(chatgpt_portfolio: pd.DataFrame, cash: float) -> None:
     spx_value = np.nan
     starting_equity = np.nan  # Ensure starting_equity is always defined
     if not spx_norm.empty:
-        initial_price = float(spx_norm["Close"].iloc[0])
-        price_now = float(spx_norm["Close"].iloc[-1])
+        initial_price = float(spx_norm["Close"].iloc[0].item())
+        price_now = float(spx_norm["Close"].iloc[-1].item())
         try:
             starting_equity = float(input("what was your starting equity? "))
         except Exception:
