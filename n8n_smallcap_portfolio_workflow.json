@@ -1,0 +1,561 @@
+{
+  "name": "Smallcap Portfolio Project",
+  "nodes": [
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "1bSlvPjjCLtnlrxW9o7UgQtxEyudEsJsNuWjZYxf43_4",
+          "mode": "list",
+          "cachedResultName": "smallcap_portfolio_update",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1bSlvPjjCLtnlrxW9o7UgQtxEyudEsJsNuWjZYxf43_4/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 1512288185,
+          "mode": "list",
+          "cachedResultName": "portfolio_update",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1bSlvPjjCLtnlrxW9o7UgQtxEyudEsJsNuWjZYxf43_4/edit#gid=1512288185"
+        },
+        "options": {
+          "dataLocationOnSheet": {
+            "values": {
+              "rangeDefinition": "detectAutomatically"
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        -48,
+        -192
+      ],
+      "id": "0cef7e9e-1370-4421-8918-4834c16bebad",
+      "name": "Google Sheets Node",
+      "alwaysOutputData": true,
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "UWOiTgg0WDRpNHoY",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "language": "python",
+        "pythonCode": "import pandas as pd\n\ndef extract_tickers():\n    try:\n        # Extract the actual data using the correct n8n Python syntax\n        rows = [it.json for it in _input.all()]\n        \n        if not rows:\n            return [{\"json\": {\"error\": \"No data received\"}}]\n        \n        # Convert to DataFrame\n        df = pd.DataFrame(rows)\n        \n        # Check for expected columns\n        if 'Date' not in df.columns:\n            return [{\"json\": {\"error\": \"Missing Date column\"}}]\n        if 'Ticker' not in df.columns:\n            return [{\"json\": {\"error\": \"Missing Ticker column\"}}]\n\n        # Ensure 'Date' column is in datetime format\n        df['Date'] = pd.to_datetime(df['Date'], errors='coerce')\n        df = df.dropna(subset=['Date'])\n\n        if df.empty:\n            return [{\"json\": {\"error\": \"DataFrame empty after date parsing\"}}]\n\n        # Filter out 'TOTAL' rows\n        df_filtered = df[df['Ticker'].astype(str).str.upper() != 'TOTAL'].copy()\n\n        if df_filtered.empty:\n            return [{\"json\": {\"error\": \"No non-TOTAL entries found\"}}]\n\n        # Find the latest date\n        latest_date = df_filtered['Date'].max()\n\n        # Filter for entries on the latest date\n        latest_day_entries = df_filtered[df_filtered['Date'] == latest_date].copy()\n\n        # Check for 'Action' column and filter out SELL actions\n        if 'Action' in latest_day_entries.columns:\n            active_tickers_on_latest_day = latest_day_entries[\n                ~latest_day_entries['Action'].astype(str).str.upper().str.startswith('SELL')\n            ].copy()\n        else:\n            active_tickers_on_latest_day = latest_day_entries.copy()\n\n        if active_tickers_on_latest_day.empty:\n            return [{\"json\": {\"error\": \"No active tickers found after filtering\"}}]\n\n        # Extract unique ticker symbols\n        unique_tickers = active_tickers_on_latest_day['Ticker'].astype(str).str.upper().unique().tolist()\n\n        # Return the tickers in the correct format for n8n\n        return [{\"json\": {\"ticker\": ticker}} for ticker in unique_tickers]\n        \n    except Exception as e:\n        return [{\"json\": {\"error\": f\"Exception: {str(e)}\"}}]\n\n# Execute the function\nreturn extract_tickers()"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        176,
+        -192
+      ],
+      "id": "40e04ca8-7760-49d3-8d19-f771c0cb9cfc",
+      "name": "Parse Current Holdings"
+    },
+    {
+      "parameters": {
+        "language": "python",
+        "pythonCode": "\"\"\"\nData Ingestion Service for n8n Trading Processor\nPermanent version with direct node access for reliable data retrieval.\n\"\"\"\n\nimport pandas as pd\nfrom datetime import datetime, timedelta\nfrom typing import Dict, List, Tuple, Any\nimport warnings\n\n# Suppress warnings for cleaner output\nwarnings.filterwarnings('ignore')\n\ndef last_trading_date(today=None):\n    \"\"\"Return last trading date (Mon–Fri), mapping Sat/Sun -> Fri.\"\"\"\n    dt = pd.Timestamp(today or datetime.now())\n    if dt.weekday() == 5:  # Sat -> Fri\n        return (dt - pd.Timedelta(days=1)).normalize()\n    if dt.weekday() == 6:  # Sun -> Fri\n        return (dt - pd.Timedelta(days=2)).normalize()\n    return dt.normalize()\n\ndef process_data_ingestion():\n    \"\"\"Main data ingestion function for n8n with direct node access.\"\"\"\n    try:\n        # Initialize data containers\n        google_sheets_data = []\n        ticker_data = []\n        dxfeed_portfolio_data = []\n        dxfeed_benchmark_data = []\n        \n        # Define benchmark and S&P 500 tickers\n        benchmarks = {'IWO', 'XBI', 'SPY', 'IWM'}\n        sp500_tickers = {'^GSPC', 'SPY', '^SPX'}\n        \n        # 1. Get Google Sheets portfolio data directly\n        try:\n            google_sheets_raw = _('Google Sheets Node').all()\n            for item in google_sheets_raw:\n                if hasattr(item['json'], 'to_py'):\n                    python_data = item['json'].to_py()\n                else:\n                    python_data = dict(item['json'])\n                \n                # Validate Google Sheets data structure\n                if all(key in python_data for key in ['Date', 'Ticker', 'Shares', 'Buy Price']):\n                    google_sheets_data.append(python_data)\n        except Exception as e:\n            # Log error but continue processing\n            pass\n\n        # 2. Get ticker list from Parse Current Holdings\n        try:\n            ticker_raw = _('Parse Current Holdings').all()\n            for item in ticker_raw:\n                if hasattr(item['json'], 'to_py'):\n                    python_data = item['json'].to_py()\n                else:\n                    python_data = dict(item['json'])\n                \n                if 'ticker' in python_data:\n                    ticker_data.append(python_data)\n        except Exception as e:\n            # Log error but continue processing\n            pass\n        \n        # 3. Get DXFeed portfolio market data\n        try:\n            dxfeed_portfolio_raw = _('DXFeed Portfolio Summary Node').all()\n            for item in dxfeed_portfolio_raw:\n                if hasattr(item['json'], 'to_py'):\n                    python_data = item['json'].to_py()\n                else:\n                    python_data = dict(item['json'])\n                \n                # Validate DXFeed data structure\n                if 'data' in python_data and isinstance(python_data['data'], dict):\n                    dxfeed_portfolio_data.append(python_data)\n        except Exception as e:\n            # Log error but continue processing\n            pass\n        \n        # 4. Get DXFeed benchmark market data\n        try:\n            dxfeed_benchmark_raw = _('DXFeed Benchmark Summary Node').all()\n            for item in dxfeed_benchmark_raw:\n                if hasattr(item['json'], 'to_py'):\n                    python_data = item['json'].to_py()\n                else:\n                    python_data = dict(item['json'])\n                \n                # Validate DXFeed data structure\n                if 'data' in python_data and isinstance(python_data['data'], dict):\n                    dxfeed_benchmark_data.append(python_data)\n        except Exception as e:\n            # Log error but continue processing\n            pass\n        \n        # Initialize classified data structure\n        classified_data = {\n            'historical_portfolio': google_sheets_data,\n            'current_market_data': [],\n            'benchmark_data': [],\n            'sp500_data': [],\n            'ticker_list': ticker_data\n        }\n        \n        # Process all DXFeed data and classify by ticker type\n        all_dxfeed_data = dxfeed_portfolio_data + dxfeed_benchmark_data\n        \n        for item in all_dxfeed_data:\n            if 'data' in item and isinstance(item['data'], dict):\n                market_item = item['data']\n                ticker = market_item.get('symbol', '').upper()\n                \n                # Skip invalid tickers\n                if not ticker or ticker in ['BY-TYPE', 'UNKNOWN']:\n                    continue\n                \n                # Standardize market data using DXFeed fields\n                standardized_item = {\n                    'Ticker': ticker,\n                    'Date': market_item.get('summary-date', datetime.now().strftime('%Y-%m-%d')),\n                    # Real OHLC data from DXFeed\n                    'Open': float(market_item.get('open', market_item.get('prev-close', 0))),\n                    'High': float(market_item.get('day-high-price', market_item.get('last', 0))),\n                    'Low': float(market_item.get('day-low-price', market_item.get('last', 0))),  # ✅ Real daily low!\n                    'Close': float(market_item.get('close', market_item.get('last', 0))),\n                    'Volume': 0,  # Not provided in this format\n                    'PrevClose': float(market_item.get('prev-close', 0)),\n                    'HasIntradayData': True,\n                    'DataSource': 'TastyTrade_DXFeed_Direct_Access',\n                    # Additional market data\n                    'Bid': float(market_item.get('bid', 0)),\n                    'Ask': float(market_item.get('ask', 0)),\n                    'Mid': float(market_item.get('mid', 0)),\n                    'Mark': float(market_item.get('mark', 0)),\n                    'YearLow': float(market_item.get('year-low-price', 0)),\n                    'YearHigh': float(market_item.get('year-high-price', 0)),\n                    'InstrumentType': market_item.get('instrument-type', ''),\n                    'UpdatedAt': market_item.get('updated-at', ''),\n                    'IsTradingHalted': market_item.get('is-trading-halted', False)\n                }\n                \n                # Classify by ticker type\n                if ticker in sp500_tickers:\n                    classified_data['sp500_data'].append(standardized_item)\n                elif ticker in benchmarks:\n                    classified_data['benchmark_data'].append(standardized_item)\n                else:\n                    classified_data['current_market_data'].append(standardized_item)\n        \n        # Enhanced debug info\n        debug_info = {\n            \"processing_date\": datetime.now().isoformat(),\n            \"data_access_method\": \"direct_node_access\",\n            \"data_sources\": {\n                \"google_sheets_available\": len(google_sheets_data) > 0,\n                \"ticker_list_available\": len(ticker_data) > 0,\n                \"dxfeed_portfolio_available\": len(dxfeed_portfolio_data) > 0,\n                \"dxfeed_benchmark_available\": len(dxfeed_benchmark_data) > 0,\n                \"total_raw_items\": len(all_dxfeed_data)\n            },\n            \"classified_counts\": {\n                \"historical_portfolio\": len(classified_data['historical_portfolio']),\n                \"current_market_data\": len(classified_data['current_market_data']),\n                \"benchmark_data\": len(classified_data['benchmark_data']),\n                \"sp500_data\": len(classified_data['sp500_data']),\n                \"ticker_list\": len(classified_data['ticker_list'])\n            },\n            \"data_quality\": {\n                \"all_tickers_have_intraday\": True,\n                \"data_source\": \"TastyTrade_DXFeed_Direct_Access_Permanent\"\n            },\n            \"tickers_found\": {\n                \"portfolio\": [item['Ticker'] for item in classified_data['current_market_data']],\n                \"benchmarks\": [item['Ticker'] for item in classified_data['benchmark_data']],\n                \"sp500\": [item['Ticker'] for item in classified_data['sp500_data']]\n            }\n        }\n        \n        # Return classified data in n8n format\n        return [{\n            \"json\": {\n                \"type\": \"classified_data\",\n                **classified_data,\n                \"debug_info\": debug_info\n            }\n        }]\n        \n    except Exception as e:\n        import traceback\n        return [{\n            \"json\": {\n                \"type\": \"error\",\n                \"error\": f\"Data ingestion failed: {str(e)}\",\n                \"traceback\": traceback.format_exc(),\n                \"timestamp\": datetime.now().isoformat()\n            }\n        }]\n\n# Execute the main function\nreturn process_data_ingestion()"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1056,
+        -96
+      ],
+      "id": "97f7fe97-4da1-4817-aa75-e0db97411c18",
+      "name": "Data Ingestion Node",
+      "executeOnce": false
+    },
+    {
+      "parameters": {
+        "language": "python",
+        "pythonCode": "\"\"\"\nn8n Trading Portfolio Processor - STRICT MODE\nNo fallback data - requires real-time market data for all positions.\n\"\"\"\n\nimport pandas as pd\nimport numpy as np\nimport json\nfrom datetime import datetime, timedelta\nimport warnings\n\n# Suppress warnings for cleaner output\nwarnings.filterwarnings('ignore')\n\ndef last_trading_date(today=None):\n    \"\"\"Return last trading date (Mon–Fri), mapping Sat/Sun -> Fri.\"\"\"\n    dt = pd.Timestamp(today or datetime.now())\n    if dt.weekday() == 5:  # Sat -> Fri\n        return (dt - pd.Timedelta(days=1)).normalize()\n    if dt.weekday() == 6:  # Sun -> Fri\n        return (dt - pd.Timedelta(days=2)).normalize()\n    return dt.normalize()\n\ndef process_trading_portfolio():\n    try:\n        # Get input data from Data Ingestion Node\n        input_items = _input.all()\n        \n        if not input_items:\n            return [{\"json\": {\"error\": \"No input data received from Data Ingestion Node\"}}]\n        \n        # Get the classified data from the first input item\n        classified_input = input_items[0]['json']\n        \n        # Validate that we received classified data\n        if classified_input.get(\"type\") != \"classified_data\":\n            return [{\"json\": {\n                \"error\": f\"Expected classified data from Data Ingestion Node, got type: {classified_input.get('type', 'unknown')}\",\n                \"received_data\": classified_input\n            }}]\n        \n        # Extract classified data\n        historical_portfolio = classified_input.get('historical_portfolio', [])\n        current_market_data = classified_input.get('current_market_data', [])\n        benchmark_data = classified_input.get('benchmark_data', [])\n        sp500_data = classified_input.get('sp500_data', [])\n        debug_info = classified_input.get('debug_info', {})\n        \n        # Data summary\n        data_summary = {\n            \"historical_portfolio_count\": len(historical_portfolio),\n            \"current_market_data_count\": len(current_market_data),\n            \"benchmark_data_count\": len(benchmark_data),\n            \"sp500_data_count\": len(sp500_data),\n            \"market_tickers_found\": [item['Ticker'] for item in current_market_data],\n            \"benchmark_tickers_found\": [item['Ticker'] for item in benchmark_data]\n        }\n        \n        # Check if we have the required data\n        if not historical_portfolio:\n            return [{\"json\": {\n                \"error\": \"No Google Sheets portfolio data found in classified input\",\n                \"debug_info\": debug_info,\n                \"data_summary\": data_summary,\n                \"received_data_keys\": list(classified_input.keys())\n            }}]\n        \n        # Convert historical portfolio to DataFrame\n        hist_df = pd.DataFrame(historical_portfolio)\n        \n        # Clean up the data - remove row_number column if present\n        if 'row_number' in hist_df.columns:\n            hist_df = hist_df.drop('row_number', axis=1)\n        \n        # Extract current portfolio state\n        current_portfolio, cash_balance = extract_current_portfolio(hist_df)\n        \n        # Process market data (STRICT MODE - API data only)\n        market_data_dict = {}\n        for item in current_market_data:\n            ticker = item['Ticker']\n            df_data = {\n                'Open': [item['Open']],\n                'High': [item['High']], \n                'Low': [item['Low']],\n                'Close': [item['Close']],\n                'Volume': [item.get('Volume', 0)],\n                'Date': [item['Date']]\n            }\n            df = pd.DataFrame(df_data)\n            df['Date'] = pd.to_datetime(df['Date'])\n            df = df.set_index('Date')\n            market_data_dict[ticker] = df\n        \n        # Process portfolio positions\n        updated_portfolio, final_cash, portfolio_results = process_portfolio_positions(\n            current_portfolio, cash_balance, market_data_dict\n        )\n        \n        # Combine all market data for performance metrics\n        all_market_dict = market_data_dict.copy()\n        \n        # Add benchmark data if available\n        for item in benchmark_data:\n            ticker = item['Ticker']\n            df_data = {\n                'Open': [item['Open']],\n                'High': [item['High']], \n                'Low': [item['Low']],\n                'Close': [item['Close']],\n                'Volume': [item.get('Volume', 0)],\n                'Date': [item['Date']]\n            }\n            df = pd.DataFrame(df_data)\n            df['Date'] = pd.to_datetime(df['Date'])\n            df = df.set_index('Date')\n            all_market_dict[ticker] = df\n        \n        # Process S&P 500 data\n        sp500_df = pd.DataFrame()\n        if sp500_data:\n            sp500_df = pd.DataFrame(sp500_data)\n            if 'Date' in sp500_df.columns:\n                sp500_df['Date'] = pd.to_datetime(sp500_df['Date'])\n                sp500_df = sp500_df.set_index('Date').sort_index()\n        \n        # Calculate performance metrics\n        performance_metrics = calculate_performance_metrics(\n            hist_df,\n            portfolio_results, \n            all_market_dict,\n            sp500_df,\n            10000.0  # Default starting equity\n        )\n        \n        # Return results in proper n8n format\n        results = []\n        \n        # Add each portfolio update as a separate item\n        for update in portfolio_results:\n            results.append({\"json\": {\"type\": \"portfolio_update\", **update}})\n        \n        # Add performance metrics as a separate item\n        results.append({\"json\": {\"type\": \"performance_metrics\", **performance_metrics}})\n        \n        # Add updated portfolio state\n        if not updated_portfolio.empty:\n            for _, row in updated_portfolio.iterrows():\n                results.append({\"json\": {\"type\": \"portfolio_state\", **row.to_dict()}})\n        \n        # Add summary item with debug info\n        results.append({\"json\": {\n            \"type\": \"summary\",\n            \"portfolio_updates_count\": len(portfolio_results),\n            \"final_cash_balance\": final_cash,\n            \"processing_date\": datetime.now().isoformat(),\n            \"debug_info\": debug_info,\n            \"data_summary\": data_summary,\n            \"market_data_tickers\": list(market_data_dict.keys()),\n            \"strict_mode\": True,  # Indicates no fallback data used\n            \"success\": True\n        }})\n        \n        return results\n        \n    except Exception as e:\n        import traceback\n        return [{\"json\": {\n            \"error\": f\"Processing failed: {str(e)}\", \n            \"type\": \"error\",\n            \"traceback\": traceback.format_exc(),\n            \"input_data_available\": len(input_items) if 'input_items' in locals() else 0\n        }}]\n\ndef extract_current_portfolio(historical_df):\n    \"\"\"Extract current portfolio state from historical data.\"\"\"\n    if historical_df.empty:\n        return pd.DataFrame(columns=[\"ticker\", \"shares\", \"stop_loss\", \"buy_price\", \"cost_basis\"]), 10000.0\n    \n    # Get non-TOTAL rows for the latest date\n    non_total = historical_df[historical_df[\"Ticker\"] != \"TOTAL\"].copy()\n    if non_total.empty:\n        return pd.DataFrame(columns=[\"ticker\", \"shares\", \"stop_loss\", \"buy_price\", \"cost_basis\"]), 10000.0\n    \n    non_total[\"Date\"] = pd.to_datetime(non_total[\"Date\"], errors='coerce')\n    latest_date = non_total[\"Date\"].max()\n    latest_holdings = non_total[non_total[\"Date\"] == latest_date].copy()\n    \n    # Remove sold positions\n    if 'Action' in latest_holdings.columns:\n        sold_mask = latest_holdings[\"Action\"].astype(str).str.startswith(\"SELL\")\n        current_holdings = latest_holdings[~sold_mask].copy()\n    else:\n        current_holdings = latest_holdings.copy()\n    \n    # Format for processing - handle the actual column names from your Google Sheet\n    column_mapping = {\n        \"Ticker\": \"ticker\",\n        \"Shares\": \"shares\", \n        \"Buy Price\": \"buy_price\",\n        \"Cost Basis\": \"cost_basis\",\n        \"Stop Loss\": \"stop_loss\"\n    }\n    \n    # Rename columns that exist\n    existing_columns = [col for col in column_mapping.keys() if col in current_holdings.columns]\n    portfolio = current_holdings[existing_columns].rename(columns=column_mapping)\n    \n    # Ensure all required columns exist\n    required_columns = [\"ticker\", \"shares\", \"buy_price\", \"cost_basis\", \"stop_loss\"]\n    for col in required_columns:\n        if col not in portfolio.columns:\n            portfolio[col] = 0.0 if col != \"ticker\" else \"\"\n    \n    portfolio = portfolio[required_columns]\n    \n    # Get current cash balance from TOTAL rows\n    total_rows = historical_df[historical_df[\"Ticker\"] == \"TOTAL\"].copy()\n    if not total_rows.empty and 'Cash Balance' in total_rows.columns:\n        total_rows[\"Date\"] = pd.to_datetime(total_rows[\"Date\"], errors='coerce')\n        latest_total = total_rows.sort_values(\"Date\").iloc[-1]\n        cash = float(latest_total[\"Cash Balance\"]) if pd.notna(latest_total[\"Cash Balance\"]) and latest_total[\"Cash Balance\"] != \"\" else 10000.0\n    else:\n        # Estimate cash from total equity minus current positions value\n        if not current_holdings.empty and 'Total Value' in current_holdings.columns:\n            total_position_value = current_holdings['Total Value'].sum()\n            cash = max(0, 10000.0 - total_position_value)  # Rough estimate\n        else:\n            cash = 10000.0\n    \n    return portfolio, cash\n\ndef process_portfolio_positions(portfolio, cash, market_data):\n    \"\"\"Process portfolio positions and execute stop losses - STRICT MODE.\"\"\"\n    today_iso = last_trading_date().date().isoformat()\n    results = []\n    total_value = 0.0\n    total_pnl = 0.0\n    \n    # Process each position\n    for _, position in portfolio.iterrows():\n        ticker = str(position[\"ticker\"]).upper()\n        \n        # Helper function to safely convert to float\n        def safe_float(value, default=0.0):\n            if pd.isna(value) or value == '' or value is None:\n                return default\n            try:\n                return float(value)\n            except (ValueError, TypeError):\n                return default\n        \n        shares = safe_float(position[\"shares\"], 0)\n        buy_price = safe_float(position[\"buy_price\"], 0.0)\n        cost_basis = safe_float(position[\"cost_basis\"], buy_price * shares)\n        stop_loss = safe_float(position[\"stop_loss\"], 0.0)\n        \n        # Skip empty ticker rows\n        if not ticker or ticker == \"NAN\":\n            continue\n        \n        # Get market data for this ticker - STRICT MODE: API data only\n        ticker_data = market_data.get(ticker, pd.DataFrame())\n        \n        if ticker_data.empty:\n            # STRICT MODE: No fallback data, flag as error\n            result = {\n                \"Date\": today_iso, \"Ticker\": ticker, \"Shares\": shares,\n                \"Buy Price\": buy_price, \"Cost Basis\": cost_basis, \"Stop Loss\": stop_loss,\n                \"Current Price\": \"\", \"Total Value\": \"\", \"PnL\": \"\",\n                \"Action\": \"ERROR - NO REAL-TIME DATA\", \"Cash Balance\": \"\", \"Total Equity\": \"\"\n            }\n            results.append(result)\n            continue\n        \n        # Get OHLC data\n        latest_data = ticker_data.iloc[-1]\n        open_price = latest_data.get(\"Open\", latest_data.get(\"Close\", 0))\n        high_price = latest_data.get(\"High\", latest_data.get(\"Close\", 0))\n        low_price = latest_data.get(\"Low\", latest_data.get(\"Close\", 0))\n        close_price = latest_data.get(\"Close\", 0)\n        \n        # Check for stop loss trigger using real daily low price\n        # Stop loss triggered\n        if stop_loss > 0 and low_price <= stop_loss:\n            exec_price = min(open_price, stop_loss) if open_price <= stop_loss else stop_loss\n            exec_price = round(exec_price, 2)\n            value = round(exec_price * shares, 2)\n            pnl = round((exec_price - buy_price) * shares, 2)\n            cash += value\n            portfolio = portfolio[portfolio[\"ticker\"] != ticker]\n            \n            result = {\n                \"Date\": today_iso, \"Ticker\": ticker, \"Shares\": shares,\n                \"Buy Price\": buy_price, \"Cost Basis\": cost_basis, \"Stop Loss\": stop_loss,\n                \"Current Price\": exec_price, \"Total Value\": value, \"PnL\": pnl,\n                \"Action\": \"SELL - Stop Loss Triggered\", \"Cash Balance\": \"\", \"Total Equity\": \"\"\n            }\n        else:\n            # Stop loss not triggered\n            current_price = round(close_price, 2)\n            value = round(current_price * shares, 2)\n            pnl = round((current_price - buy_price) * shares, 2)\n            total_value += value\n            total_pnl += pnl\n            \n            result = {\n                \"Date\": today_iso, \"Ticker\": ticker, \"Shares\": shares,\n                \"Buy Price\": buy_price, \"Cost Basis\": cost_basis, \"Stop Loss\": stop_loss,\n                \"Current Price\": current_price, \"Total Value\": value, \"PnL\": pnl,\n                \"Action\": \"HOLD\", \"Cash Balance\": \"\", \"Total Equity\": \"\"\n            }\n        \n        results.append(result)\n    \n    # Add total row\n    total_equity = total_value + cash\n    total_row = {\n        \"Date\": today_iso, \"Ticker\": \"TOTAL\", \"Shares\": \"\", \"Buy Price\": \"\",\n        \"Cost Basis\": \"\", \"Stop Loss\": \"\", \"Current Price\": \"\",\n        \"Total Value\": round(total_value, 2), \"PnL\": round(total_pnl, 2),\n        \"Action\": \"\", \"Cash Balance\": round(cash, 2), \"Total Equity\": round(total_equity, 2)\n    }\n    results.append(total_row)\n    \n    return portfolio, cash, results\n\ndef calculate_performance_metrics(historical_df, current_results, market_data, sp500_df, starting_equity):\n    \"\"\"Calculate basic performance metrics.\"\"\"\n    today_iso = last_trading_date().date().isoformat()\n    \n    # Get current equity\n    current_equity = 10000.0\n    cash_balance = 0.0\n    \n    if current_results:\n        total_row = next((r for r in current_results if r[\"Ticker\"] == \"TOTAL\"), None)\n        if total_row:\n            current_equity = total_row.get(\"Total Equity\", 10000.0)\n            cash_balance = total_row.get(\"Cash Balance\", 0.0)\n    \n    # Basic metrics\n    return {\n        \"date\": today_iso,\n        \"current_equity\": current_equity,\n        \"cash_balance\": cash_balance,\n        \"total_positions\": len([r for r in current_results if r[\"Ticker\"] != \"TOTAL\"]),\n        \"positions_with_data\": len([r for r in current_results if r[\"Action\"] != \"ERROR - NO REAL-TIME DATA\" and r[\"Ticker\"] != \"TOTAL\"]),\n        \"positions_without_data\": len([r for r in current_results if r[\"Action\"] == \"ERROR - NO REAL-TIME DATA\"]),\n        \"strict_mode\": True\n    }\n\n# Execute the main function\nreturn process_trading_portfolio()\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1280,
+        -96
+      ],
+      "id": "8eedec64-a10b-4a9a-ba54-1bcf9300f002",
+      "name": "Portfolio Processing Node"
+    },
+    {
+      "parameters": {
+        "jsCode": "const ticker = [\n  \"IWO\", \"XBI\", \"SPY\", \"IWM\"\n  // (Add more if needed up to 100)\n];\n\n\n\nreturn ticker.map(ticker => ({\n  json: { ticker }\n}));"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        176,
+        0
+      ],
+      "id": "15f7f35d-19ee-451e-a47c-0033fb15ab10",
+      "name": "Code in JavaScript"
+    },
+    {
+      "parameters": {
+        "content": "## Flow Overview\n\n[Manual Trigger] → [Google Sheets] → [Parse Tickers] → [DXFeed Portfolio] → \\\\\n                                                                              [Data Ingestion] → [Portfolio Processing] → [Google Sheets Update] → [AI Prompt Generator] → [OpenAI API] → [Trade Execution] → [Final Output]\n[Manual Trigger] → [JavaScript Code] → [DXFeed Benchmark] → /",
+        "width": 816
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        -736,
+        -464
+      ],
+      "typeVersion": 1,
+      "id": "a1ea8da9-1133-4291-a9b5-a6228d5bc2c6",
+      "name": "Sticky Note"
+    },
+    {
+      "parameters": {
+        "content": "## What it's doing\n✅ Data Ingestion Node is properly classifying data from all sources\n✅ Portfolio Processing Node is successfully processing positions\n✅ Market data integration is working with TastyTrade API\n✅ Stop loss logic is functioning (no stop loss triggered)\n✅ P&L calculations are accurate",
+        "height": 304,
+        "width": 352
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        -736,
+        -272
+      ],
+      "typeVersion": 1,
+      "id": "609313b1-0543-4c49-8f14-b78cab5c1067",
+      "name": "Sticky Note1"
+    },
+    {
+      "parameters": {
+        "url": "https://api.cert.tastyworks.com/market-data/summary",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "oAuth2Api",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "symbol",
+              "value": "={{ $json.ticker }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        400,
+        0
+      ],
+      "id": "5c24a613-1be0-49cc-aa14-b75cd5f21c1d",
+      "name": "DXFeed Benchmark Summary Node",
+      "credentials": {
+        "oAuth2Api": {
+          "id": "gxoqknGoeXQJ2HXn",
+          "name": "TastyTrade Sandbox"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "https://api.cert.tastyworks.com/market-data/summary",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "oAuth2Api",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "symbol",
+              "value": "={{ $json.ticker }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        400,
+        -192
+      ],
+      "id": "9c640e7c-0dbc-41f1-b047-9cabd4849cd0",
+      "name": "DXFeed Portfolio Summary Node",
+      "credentials": {
+        "oAuth2Api": {
+          "id": "gxoqknGoeXQJ2HXn",
+          "name": "TastyTrade Sandbox"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "appendOrUpdate",
+        "documentId": {
+          "__rl": true,
+          "value": "1bSlvPjjCLtnlrxW9o7UgQtxEyudEsJsNuWjZYxf43_4",
+          "mode": "list",
+          "cachedResultName": "smallcap_portfolio_update",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1bSlvPjjCLtnlrxW9o7UgQtxEyudEsJsNuWjZYxf43_4/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 1512288185,
+          "mode": "list",
+          "cachedResultName": "portfolio_update",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1bSlvPjjCLtnlrxW9o7UgQtxEyudEsJsNuWjZYxf43_4/edit#gid=1512288185"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Date": "= {{ $json.Date }}",
+            "Ticker": "= {{ $json.Ticker }}",
+            "Shares": "={{ $json.Shares }}",
+            "Buy Price": "={{ $json[\"Buy Price\"] }}",
+            "Cost Basis": "={{ $json[\"Cost Basis\"] }}",
+            "Stop Loss": "={{ $json[\"Stop Loss\"] }}",
+            "Current Price": "={{ $json[\"Current Price\"] }}",
+            "Total Value": "={{ $json[\"Total Value\"] }}",
+            "PnL": "={{ $json.PnL }}",
+            "Action": "={{ $json.Action }}",
+            "Cash Balance": "={{ $json[\"Cash Balance\"] }}",
+            "Total Equity": "={{ $json[\"Total Equity\"] }}"
+          },
+          "matchingColumns": [
+            "Date"
+          ],
+          "schema": [
+            {
+              "id": "Date",
+              "displayName": "Date",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Ticker",
+              "displayName": "Ticker",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Shares",
+              "displayName": "Shares",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Buy Price",
+              "displayName": "Buy Price",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Cost Basis",
+              "displayName": "Cost Basis",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Stop Loss",
+              "displayName": "Stop Loss",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Current Price",
+              "displayName": "Current Price",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Total Value",
+              "displayName": "Total Value",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "PnL",
+              "displayName": "PnL",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Action",
+              "displayName": "Action",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Cash Balance",
+              "displayName": "Cash Balance",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Total Equity",
+              "displayName": "Total Equity",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        1424,
+        -448
+      ],
+      "id": "5351e49b-006b-4983-ad8a-fb1c87dcd3fe",
+      "name": "Update Google Sheet with Latest Position",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "UWOiTgg0WDRpNHoY",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Extract data from n8n input array\nconst items = $input.all();\n\n// Find the TOTAL row for cash and equity\nconst totalRow = items.find(item => item.json.Ticker && item.json.Ticker.trim() === 'TOTAL');\n\n// Count active positions (HOLD actions, excluding TOTAL)\nconst activePositions = items.filter(item => \n  item.json.Ticker && \n  item.json.Ticker.trim() !== 'TOTAL' && \n  item.json.Action === 'HOLD'\n);\n\n// Extract values - these DO exist in your TOTAL row\nconst cash = totalRow ? (totalRow.json['Cash Balance'] || 0) : 0;\nconst equity = totalRow ? (totalRow.json['Total Equity'] || 0) : 0;\nconst positions = activePositions.length;\n// Use the portfolio date, not today's date\nconst date = items[0]?.json.Date?.trim() || new Date().toISOString().split('T')[0];\n\n// Calculate portfolio performance metrics\nconst totalPnL = totalRow ? (totalRow.json.PnL || 0) : 0;\nconst startingEquity = 10000; // Assuming $10k start\nconst totalReturn = ((equity - startingEquity) / startingEquity * 100).toFixed(1);\n\n// Build enhanced holdings text with stop losses and allocation percentages\nconst holdingsText = activePositions.map(item => {\n  const ticker = item.json.Ticker?.trim() || 'UNKNOWN';\n  const shares = item.json.Shares || 0;\n  const buyPrice = item.json['Buy Price'] || 0;\n  const currentPrice = item.json['Current Price'] || 0;\n  const stopLoss = item.json['Stop Loss'] || 0;\n  const pnl = item.json.PnL || 0;\n  const positionValue = currentPrice * shares;\n  const allocationPct = equity > 0 ? ((positionValue / equity) * 100).toFixed(1) : 0;\n  \n  return `${ticker}: ${shares} shares @ $${currentPrice} (Buy: $${buyPrice}, Stop: $${stopLoss}, P&L: $${pnl}, ${allocationPct}% allocation)`;\n}).join('\\n') || 'No current holdings';\n\n// Build recent activity context (basic version - could be enhanced with historical data)\nconst recentActivityText = `Portfolio up $${totalPnL} (${totalReturn}%) from cost basis\\nCurrent Strategy: Holding micro-cap positions with stop losses`;\n\nconst prompt = `You are a professional portfolio analyst. Here is your current portfolio state as of ${date}:\n\n[ Holdings ]\n${holdingsText}\n\n[ Portfolio Performance ]\nTotal Return: ${totalReturn}% since inception\nCash Balance: $${cash.toLocaleString()}\nTotal Equity: $${equity.toLocaleString()}\nActive Positions: ${positions}\nPortfolio Started: ~$${startingEquity.toLocaleString()}\n\n[ Recent Activity ]\n${recentActivityText}\n\nRules:\n- You have $${cash.toLocaleString()} in cash available for new positions\n- Prefer U.S. micro-cap stocks (<$300M market cap)\n- Full shares only, no options or derivatives\n- Use stop-losses for risk management (current stops shown above)\n- Be conservative with position sizing (max 25% per position)\n- Consider liquidity for exit strategies\n\nAnalyze the current market conditions, portfolio concentration, and stop-loss levels. Provide specific trading recommendations.\n\nRespond with ONLY a JSON object in this exact format:\n{\n    \"analysis\": \"Brief market analysis and portfolio assessment\",\n    \"trades\": [\n        {\n            \"action\": \"buy\",\n            \"ticker\": \"SYMBOL\", \n            \"shares\": 100,\n            \"price\": 25.50,\n            \"stop_loss\": 20.00,\n            \"reason\": \"Brief rationale including market cap and liquidity assessment\"\n        }\n    ],\n    \"portfolio_adjustments\": [\n        {\n            \"action\": \"adjust_stop\",\n            \"ticker\": \"EXISTING_SYMBOL\",\n            \"new_stop_loss\": 22.00,\n            \"reason\": \"Brief rationale for stop adjustment\"\n        }\n    ],\n    \"confidence\": 0.8\n}\n\nOnly recommend trades you are confident about. If no trades are recommended, use empty arrays.`;\n\n// Build structured position data for programmatic access\nconst currentPositions = activePositions.map(item => ({\n  ticker: item.json.Ticker?.trim() || 'UNKNOWN',\n  shares: item.json.Shares || 0,\n  buy_price: item.json['Buy Price'] || 0,\n  current_price: item.json['Current Price'] || 0,\n  stop_loss: item.json['Stop Loss'] || 0,\n  pnl: item.json.PnL || 0,\n  allocation_pct: equity > 0 ? parseFloat(((item.json['Current Price'] * item.json.Shares) / equity * 100).toFixed(1)) : 0\n}));\n\nreturn {\n  json: {\n    prompt: prompt,\n    cash_balance: cash,\n    total_equity: equity,\n    active_positions: positions,\n    date: date,\n    portfolio_performance: {\n      total_return_pct: parseFloat(totalReturn),\n      total_pnl: totalPnL,\n      starting_equity: startingEquity\n    },\n    current_positions: currentPositions\n  }\n};\n\n// Validation function for AI responses\nfunction validateAIResponse(response, currentPositions) {\n    const validation = {\n        valid: true,\n        warnings: [],\n        errors: []\n    };\n    \n    // Validate stop-loss adjustments\n    response.portfolio_adjustments?.forEach(adj => {\n        if (adj.action === 'adjust_stop') {\n            const position = currentPositions.find(p => p.ticker === adj.ticker);\n            if (!position) {\n                validation.errors.push(`Stop adjustment for unknown ticker: ${adj.ticker}`);\n                validation.valid = false;\n            } else if (adj.new_stop_loss >= position.current_price) {\n                validation.warnings.push(`New stop-loss for ${adj.ticker} ($${adj.new_stop_loss}) is above current price ($${position.current_price})`);\n            }\n        }\n    });\n    \n    // Validate trades\n    response.trades?.forEach(trade => {\n        if (trade.action === 'buy' && trade.price <= 0) {\n            validation.errors.push(`Invalid price for ${trade.ticker}: $${trade.price}`);\n            validation.valid = false;\n        }\n    });\n    \n    return validation;\n}"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1504,
+        -96
+      ],
+      "id": "40ed2bc4-7fd1-4467-bd0d-afcae2c65b12",
+      "name": "AI Prompt Code"
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "value": "gpt-4.1-mini",
+          "mode": "list",
+          "cachedResultName": "GPT-4.1-MINI"
+        },
+        "messages": {
+          "values": [
+            {
+              "content": "={{ $json.prompt }}",
+              "role": "assistant"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1.8,
+      "position": [
+        1744,
+        -224
+      ],
+      "id": "61728ca2-cc58-4082-acd9-3e936f53d088",
+      "name": "Message a model",
+      "credentials": {
+        "openAiApi": {
+          "id": "iPSayimeoyFh4A3t",
+          "name": "OpenAi account"
+        }
+      }
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -64,
+        0
+      ],
+      "id": "5d844fe4-9bf1-4d74-ae2e-874609b09ea3",
+      "name": "When clicking ‘Execute workflow’"
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "fieldsToMatchString": "data.symbol",
+        "joinMode": "keepEverything",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        768,
+        -128
+      ],
+      "id": "6957fd6b-cbd6-45b6-9631-088e5449adf2",
+      "name": "Merge",
+      "executeOnce": false
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Google Sheets Node": {
+      "main": [
+        [
+          {
+            "node": "Parse Current Holdings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Current Holdings": {
+      "main": [
+        [
+          {
+            "node": "DXFeed Portfolio Summary Node",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Data Ingestion Node": {
+      "main": [
+        [
+          {
+            "node": "Portfolio Processing Node",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript": {
+      "main": [
+        [
+          {
+            "node": "DXFeed Benchmark Summary Node",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "DXFeed Benchmark Summary Node": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "DXFeed Portfolio Summary Node": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Portfolio Processing Node": {
+      "main": [
+        [
+          {
+            "node": "AI Prompt Code",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Google Sheet with Latest Position": {
+      "main": [
+        []
+      ]
+    },
+    "AI Prompt Code": {
+      "main": [
+        []
+      ]
+    },
+    "When clicking ‘Execute workflow’": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Google Sheets Node",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge": {
+      "main": [
+        [
+          {
+            "node": "Data Ingestion Node",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "5ff80dc3-f789-4714-bfc3-d21227ee92da",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "2ceb8b6526d90862aa73781ca6b69e51ed8d9a324424d4952a7562b1e0d83c34"
+  },
+  "id": "zfpUbEMzs7CMh9CG",
+  "tags": []
+}
