@@ -1,14 +1,13 @@
 """
-n8n Trading Portfolio Processor
-
-Simplified version of the trading script designed specifically for n8n integration.
-Accepts data from upstream nodes and returns processed portfolio updates.
+Portfolio Processing Node - Production Version
+Receives classified data from Data Ingestion Node and processes portfolio.
+STRICT MODE: No fallback data - requires real-time market data for all positions.
 """
 
 import pandas as pd
 import numpy as np
-import json
 from datetime import datetime, timedelta
+from typing import Dict, List, Tuple, Any
 import warnings
 
 # Suppress warnings for cleaner output
@@ -24,109 +23,38 @@ def last_trading_date(today=None):
     return dt.normalize()
 
 def process_trading_portfolio():
+    """Main processing function that coordinates all modules."""
     try:
-        # Get all input data
-        all_input_data = [item.json for item in _input.all()]
+        # Get input data from Data Ingestion Node
+        input_items = _input.all()
         
+        # Check if we have any input
+        if not input_items:
+            return [{"json": {"error": "No input data received from Data Ingestion Node", "type": "error"}}]
         
-        if not all_input_data:
-            return [{"json": {"error": "No input data received from any source"}}]
+        # Get the classified data from the first input item
+        classified_input = input_items[0]['json']
         
-        # Separate the different types of data based on their structure
-        historical_portfolio = []
-        current_market_data = []
-        benchmark_data = []
-        sp500_data = []
+        # Convert JS proxy to Python dict if needed
+        if hasattr(classified_input, 'to_py'):
+            classified_input = classified_input.to_py()
+        elif not isinstance(classified_input, dict):
+            classified_input = dict(classified_input)
         
-        # Debug info to see what we're receiving
-        input_analysis = []
+        # Validate that we received classified data
+        if classified_input.get("type") != "classified_data":
+            return [{"json": {
+                "error": f"Expected classified data from Data Ingestion Node, got type: {classified_input.get('type', 'unknown')}",
+                "type": "error",
+                "received_data": classified_input
+            }}]
         
-        for i, item in enumerate(all_input_data):
-            item_info = {
-                "item_index": i,
-                "keys": list(item.keys()),
-                "sample_data": {}
-            }
-            
-            # Better sample data representation
-            for k, v in item.items():
-                if isinstance(v, dict):
-                    item_info["sample_data"][k] = f"Dict with keys: {list(v.keys())}"
-                elif isinstance(v, list):
-                    item_info["sample_data"][k] = f"List with {len(v)} items"
-                else:
-                    item_info["sample_data"][k] = str(v)[:100]
-            
-            # Check if this is Google Sheets portfolio data
-            # Your data has: row_number, Date, Ticker, Shares, Buy Price, Cost Basis, Stop Loss, etc.
-            if 'row_number' in item and 'Date' in item and 'Ticker' in item and 'Shares' in item:
-                historical_portfolio.append(item)
-                item_info["identified_as"] = "Google Sheets Portfolio Data"
-            
-            # Also check for the alternative format without row_number
-            elif 'Date' in item and 'Ticker' in item and 'Shares' in item and 'Buy Price' in item:
-                historical_portfolio.append(item)
-                item_info["identified_as"] = "Google Sheets Portfolio Data (alt format)"
-            
-            # Check if this is market data from API
-            elif 'data' in item and isinstance(item['data'], dict):
-                market_item = item['data']
-                
-                # Check if it has the expected market data structure
-                if 'symbol' in market_item and ('last' in market_item or 'mark' in market_item):
-                    # Extract ticker symbol
-                    ticker = (market_item.get('symbol') or market_item.get('Ticker') or market_item.get('ticker', '')).upper()
-                    
-                    if ticker:
-                        # Convert to standard OHLCV format using available fields
-                        standardized_item = {
-                            'Ticker': ticker,
-                            'Date': market_item.get('summary-date', datetime.now().strftime('%Y-%m-%d')),
-                            'Open': float(market_item.get('prev-close', market_item.get('last', 0))),
-                            'High': float(market_item.get('year-high-price', market_item.get('last', 0))),
-                            'Low': float(market_item.get('year-low-price', market_item.get('last', 0))),
-                            'Close': float(market_item.get('last', market_item.get('mark', 0))),
-                            'Volume': 0,  # Not available in this data format
-                            'Bid': float(market_item.get('bid', 0)),
-                            'Ask': float(market_item.get('ask', 0)),
-                            'Mid': float(market_item.get('mid', 0))
-                        }
-                        
-                        # Categorize by ticker type
-                        benchmarks = {'IWO', 'XBI', 'SPY', 'IWM'}
-                        sp500_tickers = {'^GSPC', 'SPY', '^SPX'}
-                        
-                        if ticker in sp500_tickers:
-                            sp500_data.append(standardized_item)
-                            item_info["identified_as"] = "S&P 500 Market Data"
-                        elif ticker in benchmarks:
-                            benchmark_data.append(standardized_item)
-                            item_info["identified_as"] = "Benchmark Market Data"
-                        else:
-                            current_market_data.append(standardized_item)
-                            item_info["identified_as"] = "Portfolio Market Data"
-                    else:
-                        item_info["identified_as"] = "Market Data (no ticker found)"
-                else:
-                    item_info["identified_as"] = "Data object (not market data)"
-            
-            # Check for other possible data structures
-            elif 'ticker' in item:
-                item_info["identified_as"] = "Ticker Data (from extraction node)"
-            else:
-                item_info["identified_as"] = "Unknown Data Structure"
-            
-            input_analysis.append(item_info)
-        
-        # Enhanced debug info
-        debug_info = {
-            "total_input_items": len(all_input_data),
-            "input_analysis": input_analysis[:5],  # Show first 5 items for brevity
-            "historical_portfolio_count": len(historical_portfolio),
-            "current_market_data_count": len(current_market_data),
-            "benchmark_data_count": len(benchmark_data),
-            "sp500_data_count": len(sp500_data)
-        }
+        # Extract classified data
+        historical_portfolio = classified_input.get('historical_portfolio', [])
+        current_market_data = classified_input.get('current_market_data', [])
+        benchmark_data = classified_input.get('benchmark_data', [])
+        sp500_data = classified_input.get('sp500_data', [])
+        debug_info = classified_input.get('debug_info', {})
         
         # Data summary
         data_summary = {
@@ -134,17 +62,18 @@ def process_trading_portfolio():
             "current_market_data_count": len(current_market_data),
             "benchmark_data_count": len(benchmark_data),
             "sp500_data_count": len(sp500_data),
-            "market_tickers_found": [item['Ticker'] for item in current_market_data] if current_market_data else []
+            "market_tickers_found": [item['Ticker'] for item in current_market_data],
+            "benchmark_tickers_found": [item['Ticker'] for item in benchmark_data]
         }
         
         # Check if we have the required data
         if not historical_portfolio:
             return [{"json": {
-                "error": "No Google Sheets portfolio data found in input",
+                "error": "No Google Sheets portfolio data found in classified input",
+                "type": "error",
                 "debug_info": debug_info,
                 "data_summary": data_summary,
-                "help": "Make sure the Google Sheets data is being passed to this node with Date, Ticker, Shares columns",
-                "first_few_items": all_input_data[:3] if len(all_input_data) >= 3 else all_input_data
+                "received_data_keys": list(classified_input.keys())
             }}]
         
         # Convert historical portfolio to DataFrame
@@ -157,50 +86,45 @@ def process_trading_portfolio():
         # Extract current portfolio state
         current_portfolio, cash_balance = extract_current_portfolio(hist_df)
         
-        # Process market data into the format expected by portfolio processing
+        # STRICT MODE: Process ONLY real-time market data - NO FALLBACKS
         market_data_dict = {}
         for item in current_market_data:
             ticker = item['Ticker']
-            
-            # Create DataFrame with the market data
             df_data = {
                 'Open': [item['Open']],
                 'High': [item['High']], 
                 'Low': [item['Low']],
                 'Close': [item['Close']],
                 'Volume': [item.get('Volume', 0)],
-                'Date': [item['Date']]
+                'Date': [item['Date']],
+                'HasIntradayData': [item.get('HasIntradayData', True)]
             }
             df = pd.DataFrame(df_data)
             df['Date'] = pd.to_datetime(df['Date'])
             df = df.set_index('Date')
             market_data_dict[ticker] = df
         
-        # If no external market data for some tickers, use historical prices from Google Sheets
+        # STRICT MODE: Validate that we have real-time data for ALL portfolio positions
         if current_portfolio is not None and not current_portfolio.empty:
+            missing_data_tickers = []
             for _, position in current_portfolio.iterrows():
                 ticker = str(position["ticker"]).upper()
-                if ticker not in market_data_dict:
-                    # Try to find this ticker in historical data
-                    ticker_hist = hist_df[hist_df['Ticker'] == ticker]
-                    if not ticker_hist.empty and 'Current Price' in ticker_hist.columns:
-                        latest_price = ticker_hist['Current Price'].iloc[-1]
-                        if pd.notna(latest_price) and latest_price != "":
-                            current_price = float(latest_price)
-                            df_data = {
-                                'Open': [current_price],
-                                'High': [current_price], 
-                                'Low': [current_price],
-                                'Close': [current_price],
-                                'Volume': [0],
-                                'Date': [datetime.now().strftime('%Y-%m-%d')]
-                            }
-                            df = pd.DataFrame(df_data)
-                            df['Date'] = pd.to_datetime(df['Date'])
-                            df = df.set_index('Date')
-                            market_data_dict[ticker] = df
+                if ticker and ticker != "NAN" and ticker not in market_data_dict:
+                    missing_data_tickers.append(ticker)
+            
+            # ERROR OUT if any positions lack real-time data
+            if missing_data_tickers:
+                return [{"json": {
+                    "error": f"CRITICAL: Missing real-time market data for positions: {missing_data_tickers}",
+                    "type": "error",
+                    "missing_tickers": missing_data_tickers,
+                    "available_market_data": list(market_data_dict.keys()),
+                    "portfolio_tickers": [str(pos["ticker"]).upper() for _, pos in current_portfolio.iterrows()],
+                    "data_summary": data_summary,
+                    "help": "All portfolio positions must have real-time market data. Check DXFeed API connections."
+                }}]
         
-        # Process portfolio positions
+        # Process portfolio positions (now guaranteed to have real-time data)
         updated_portfolio, final_cash, portfolio_results = process_portfolio_positions(
             current_portfolio, cash_balance, market_data_dict
         )
@@ -234,11 +158,7 @@ def process_trading_portfolio():
         
         # Calculate performance metrics
         performance_metrics = calculate_performance_metrics(
-            hist_df,
-            portfolio_results, 
-            all_market_dict,
-            sp500_df,
-            10000.0  # Default starting equity
+            hist_df, portfolio_results, all_market_dict, sp500_df, 10000.0
         )
         
         # Return results in proper n8n format
@@ -265,6 +185,7 @@ def process_trading_portfolio():
             "debug_info": debug_info,
             "data_summary": data_summary,
             "market_data_tickers": list(market_data_dict.keys()),
+            "data_quality": "REAL_TIME_ONLY",
             "success": True
         }})
         
@@ -276,7 +197,7 @@ def process_trading_portfolio():
             "error": f"Processing failed: {str(e)}", 
             "type": "error",
             "traceback": traceback.format_exc(),
-            "input_data_available": len(all_input_data) if 'all_input_data' in locals() else 0
+            "input_data_available": len(input_items) if 'input_items' in locals() else 0
         }}]
 
 def extract_current_portfolio(historical_df):
@@ -343,9 +264,10 @@ def process_portfolio_positions(portfolio, cash, market_data):
     results = []
     total_value = 0.0
     total_pnl = 0.0
+    updated_portfolio = portfolio.copy()
     
     # Process each position
-    for _, position in portfolio.iterrows():
+    for idx, position in portfolio.iterrows():
         ticker = str(position["ticker"]).upper()
         shares = float(position["shares"]) if not pd.isna(position["shares"]) else 0
         buy_price = float(position["buy_price"]) if not pd.isna(position["buy_price"]) else 0.0
@@ -356,7 +278,7 @@ def process_portfolio_positions(portfolio, cash, market_data):
         if not ticker or ticker == "NAN":
             continue
         
-        # Get market data for this ticker
+        # Get market data for this ticker (guaranteed to exist due to validation above)
         ticker_data = market_data.get(ticker, pd.DataFrame())
         
         if ticker_data.empty:
@@ -364,26 +286,26 @@ def process_portfolio_positions(portfolio, cash, market_data):
                 "Date": today_iso, "Ticker": ticker, "Shares": shares,
                 "Buy Price": buy_price, "Cost Basis": cost_basis, "Stop Loss": stop_loss,
                 "Current Price": "", "Total Value": "", "PnL": "",
-                "Action": "NO DATA", "Cash Balance": "", "Total Equity": ""
+                "Action": "ERROR - NO REAL-TIME DATA", "Cash Balance": "", "Total Equity": ""
             }
             results.append(result)
             continue
         
-        # Get OHLC data
+        # Get OHLC data from real-time source
         latest_data = ticker_data.iloc[-1]
         open_price = latest_data.get("Open", latest_data.get("Close", 0))
         high_price = latest_data.get("High", latest_data.get("Close", 0))
-        low_price = latest_data.get("Low", latest_data.get("Close", 0))
+        low_price = latest_data.get("Low", latest_data.get("Close", 0))  # REAL daily low for stop loss
         close_price = latest_data.get("Close", 0)
         
-        # Check for stop loss trigger
+        # Check for stop loss trigger using REAL daily low
         if stop_loss > 0 and low_price <= stop_loss:
             exec_price = min(open_price, stop_loss) if open_price <= stop_loss else stop_loss
             exec_price = round(exec_price, 2)
             value = round(exec_price * shares, 2)
             pnl = round((exec_price - buy_price) * shares, 2)
             cash += value
-            portfolio = portfolio[portfolio["ticker"] != ticker]
+            updated_portfolio = updated_portfolio[updated_portfolio["ticker"] != ticker]
             
             result = {
                 "Date": today_iso, "Ticker": ticker, "Shares": shares,
@@ -417,29 +339,54 @@ def process_portfolio_positions(portfolio, cash, market_data):
     }
     results.append(total_row)
     
-    return portfolio, cash, results
+    return updated_portfolio, cash, results
 
 def calculate_performance_metrics(historical_df, current_results, market_data, sp500_df, starting_equity):
     """Calculate basic performance metrics."""
     today_iso = last_trading_date().date().isoformat()
     
     # Get current equity
-    current_equity = 10000.0
+    current_equity = starting_equity
     cash_balance = 0.0
+    total_value = 0.0
     
     if current_results:
         total_row = next((r for r in current_results if r["Ticker"] == "TOTAL"), None)
         if total_row:
-            current_equity = total_row.get("Total Equity", 10000.0)
+            current_equity = total_row.get("Total Equity", starting_equity)
             cash_balance = total_row.get("Cash Balance", 0.0)
+            total_value = total_row.get("Total Value", 0.0)
+    
+    # Calculate performance metrics
+    total_return = ((current_equity - starting_equity) / starting_equity) * 100 if starting_equity > 0 else 0.0
+    
+    # Get benchmark performance if available
+    benchmark_performance = {}
+    benchmarks = ['IWO', 'XBI', 'SPY', 'IWM']
+    for benchmark in benchmarks:
+        if benchmark in market_data:
+            benchmark_df = market_data[benchmark]
+            if not benchmark_df.empty:
+                current_price = benchmark_df.iloc[-1]['Close']
+                benchmark_performance[benchmark] = {
+                    'current_price': current_price,
+                    'ticker': benchmark
+                }
     
     # Basic metrics
     return {
         "date": today_iso,
         "current_equity": current_equity,
         "cash_balance": cash_balance,
+        "total_positions_value": total_value,
+        "starting_equity": starting_equity,
+        "total_return_percent": round(total_return, 2),
+        "total_return_dollars": round(current_equity - starting_equity, 2),
         "total_positions": len([r for r in current_results if r["Ticker"] != "TOTAL"]),
-        "positions_with_data": len([r for r in current_results if r["Action"] != "NO DATA" and r["Ticker"] != "TOTAL"])
+        "positions_with_data": len([r for r in current_results if r["Action"] != "NO DATA" and r["Ticker"] != "TOTAL"]),
+        "positions_on_hold": len([r for r in current_results if r["Action"] == "HOLD"]),
+        "positions_sold": len([r for r in current_results if "SELL" in str(r.get("Action", ""))]),
+        "benchmark_data": benchmark_performance
     }
 
 # Execute the main function

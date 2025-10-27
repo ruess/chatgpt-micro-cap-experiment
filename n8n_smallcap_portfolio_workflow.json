@@ -1,115 +1,46 @@
 {
-  "name": "Smallcap Portfolio Project",
+  "name": "Smallcap Portfolio Project - Alpaca",
   "nodes": [
     {
       "parameters": {
-        "documentId": {
-          "__rl": true,
-          "value": "1bSlvPjjCLtnlrxW9o7UgQtxEyudEsJsNuWjZYxf43_4",
-          "mode": "list",
-          "cachedResultName": "smallcap_portfolio_update",
-          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1bSlvPjjCLtnlrxW9o7UgQtxEyudEsJsNuWjZYxf43_4/edit?usp=drivesdk"
-        },
-        "sheetName": {
-          "__rl": true,
-          "value": 1512288185,
-          "mode": "list",
-          "cachedResultName": "portfolio_update",
-          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1bSlvPjjCLtnlrxW9o7UgQtxEyudEsJsNuWjZYxf43_4/edit#gid=1512288185"
-        },
-        "options": {
-          "dataLocationOnSheet": {
-            "values": {
-              "rangeDefinition": "detectAutomatically"
-            }
-          }
-        }
-      },
-      "type": "n8n-nodes-base.googleSheets",
-      "typeVersion": 4.7,
-      "position": [
-        -48,
-        -192
-      ],
-      "id": "0cef7e9e-1370-4421-8918-4834c16bebad",
-      "name": "Google Sheets Node",
-      "alwaysOutputData": true,
-      "credentials": {
-        "googleSheetsOAuth2Api": {
-          "id": "UWOiTgg0WDRpNHoY",
-          "name": "Google Sheets account"
-        }
-      }
-    },
-    {
-      "parameters": {
-        "language": "python",
-        "pythonCode": "import pandas as pd\n\ndef extract_tickers():\n    try:\n        # Extract the actual data using the correct n8n Python syntax\n        rows = [it.json for it in _input.all()]\n        \n        if not rows:\n            return [{\"json\": {\"error\": \"No data received\"}}]\n        \n        # Convert to DataFrame\n        df = pd.DataFrame(rows)\n        \n        # Check for expected columns\n        if 'Date' not in df.columns:\n            return [{\"json\": {\"error\": \"Missing Date column\"}}]\n        if 'Ticker' not in df.columns:\n            return [{\"json\": {\"error\": \"Missing Ticker column\"}}]\n\n        # Ensure 'Date' column is in datetime format\n        df['Date'] = pd.to_datetime(df['Date'], errors='coerce')\n        df = df.dropna(subset=['Date'])\n\n        if df.empty:\n            return [{\"json\": {\"error\": \"DataFrame empty after date parsing\"}}]\n\n        # Filter out 'TOTAL' rows\n        df_filtered = df[df['Ticker'].astype(str).str.upper() != 'TOTAL'].copy()\n\n        if df_filtered.empty:\n            return [{\"json\": {\"error\": \"No non-TOTAL entries found\"}}]\n\n        # Find the latest date\n        latest_date = df_filtered['Date'].max()\n\n        # Filter for entries on the latest date\n        latest_day_entries = df_filtered[df_filtered['Date'] == latest_date].copy()\n\n        # Check for 'Action' column and filter out SELL actions\n        if 'Action' in latest_day_entries.columns:\n            active_tickers_on_latest_day = latest_day_entries[\n                ~latest_day_entries['Action'].astype(str).str.upper().str.startswith('SELL')\n            ].copy()\n        else:\n            active_tickers_on_latest_day = latest_day_entries.copy()\n\n        if active_tickers_on_latest_day.empty:\n            return [{\"json\": {\"error\": \"No active tickers found after filtering\"}}]\n\n        # Extract unique ticker symbols\n        unique_tickers = active_tickers_on_latest_day['Ticker'].astype(str).str.upper().unique().tolist()\n\n        # Return the tickers in the correct format for n8n\n        return [{\"json\": {\"ticker\": ticker}} for ticker in unique_tickers]\n        \n    except Exception as e:\n        return [{\"json\": {\"error\": f\"Exception: {str(e)}\"}}]\n\n# Execute the function\nreturn extract_tickers()"
+        "jsCode": "return (async function() {\n    try {\n        // The 'items' global variable in n8n contains the input data from the previous node.\n        // Alpaca API positions come as separate n8n items, each with a 'json' property containing position data.\n        const inputItems = items;\n\n        if (!inputItems || inputItems.length === 0) {\n            return [{ json: { error: \"No data received from previous node.\" } }];\n        }\n\n        const processedPositions = [];\n        for (const item of inputItems) {\n            const position = item.json;\n            \n            // Ensure we only process 'long' positions\n            // Adjust these filters based on your specific needs for other asset classes or short positions.\n            if (position && position.side === \"long\") {\n                processedPositions.push({\n                    \"symbol\": position.symbol,\n                    \"quantity\": parseFloat(position.qty || 0),\n                    \"average_open_price\": parseFloat(position.avg_entry_price || 0.0),\n                    // Using current_price as the current market price from Alpaca\n                    \"current_close_price\": parseFloat(position.current_price || 0.0)\n                });\n            }\n        }\n\n        if (processedPositions.length === 0) {\n            return [{ json: { error: \"No active long positions found after filtering (e.g., short positions filtered out).\" } }];\n        }\n\n        // Return the extracted data in the correct format for n8n.\n        // Each object in 'processedPositions' will become a separate output item in n8n.\n        return processedPositions.map(pos => ({ json: pos }));\n\n    } catch (e) {\n        // For detailed error reporting in n8n, return an item with error info.\n        console.error(`Error in Parse Current Holdings node: ${e.message}`);\n        return [{\n            json: {\n                type: \"error\",\n                error: `Error in Parse Current Holdings node: ${e.message}`,\n                traceback: e.stack, // Provides stack trace\n                timestamp: new Date().toISOString()\n            }\n        }];\n    }\n})(); // Immediately invoke the async function\n"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        176,
-        -192
+        -1264,
+        -756
       ],
-      "id": "40e04ca8-7760-49d3-8d19-f771c0cb9cfc",
+      "id": "24d04a5d-71d0-4d0e-b233-34445dc7d936",
       "name": "Parse Current Holdings"
     },
     {
       "parameters": {
-        "language": "python",
-        "pythonCode": "\"\"\"\nData Ingestion Service for n8n Trading Processor\nPermanent version with direct node access for reliable data retrieval.\n\"\"\"\n\nimport pandas as pd\nfrom datetime import datetime, timedelta\nfrom typing import Dict, List, Tuple, Any\nimport warnings\n\n# Suppress warnings for cleaner output\nwarnings.filterwarnings('ignore')\n\ndef last_trading_date(today=None):\n    \"\"\"Return last trading date (Mon–Fri), mapping Sat/Sun -> Fri.\"\"\"\n    dt = pd.Timestamp(today or datetime.now())\n    if dt.weekday() == 5:  # Sat -> Fri\n        return (dt - pd.Timedelta(days=1)).normalize()\n    if dt.weekday() == 6:  # Sun -> Fri\n        return (dt - pd.Timedelta(days=2)).normalize()\n    return dt.normalize()\n\ndef process_data_ingestion():\n    \"\"\"Main data ingestion function for n8n with direct node access.\"\"\"\n    try:\n        # Initialize data containers\n        google_sheets_data = []\n        ticker_data = []\n        dxfeed_portfolio_data = []\n        dxfeed_benchmark_data = []\n        \n        # Define benchmark and S&P 500 tickers\n        benchmarks = {'IWO', 'XBI', 'SPY', 'IWM'}\n        sp500_tickers = {'^GSPC', 'SPY', '^SPX'}\n        \n        # 1. Get Google Sheets portfolio data directly\n        try:\n            google_sheets_raw = _('Google Sheets Node').all()\n            for item in google_sheets_raw:\n                if hasattr(item['json'], 'to_py'):\n                    python_data = item['json'].to_py()\n                else:\n                    python_data = dict(item['json'])\n                \n                # Validate Google Sheets data structure\n                if all(key in python_data for key in ['Date', 'Ticker', 'Shares', 'Buy Price']):\n                    google_sheets_data.append(python_data)\n        except Exception as e:\n            # Log error but continue processing\n            pass\n\n        # 2. Get ticker list from Parse Current Holdings\n        try:\n            ticker_raw = _('Parse Current Holdings').all()\n            for item in ticker_raw:\n                if hasattr(item['json'], 'to_py'):\n                    python_data = item['json'].to_py()\n                else:\n                    python_data = dict(item['json'])\n                \n                if 'ticker' in python_data:\n                    ticker_data.append(python_data)\n        except Exception as e:\n            # Log error but continue processing\n            pass\n        \n        # 3. Get DXFeed portfolio market data\n        try:\n            dxfeed_portfolio_raw = _('DXFeed Portfolio Summary Node').all()\n            for item in dxfeed_portfolio_raw:\n                if hasattr(item['json'], 'to_py'):\n                    python_data = item['json'].to_py()\n                else:\n                    python_data = dict(item['json'])\n                \n                # Validate DXFeed data structure\n                if 'data' in python_data and isinstance(python_data['data'], dict):\n                    dxfeed_portfolio_data.append(python_data)\n        except Exception as e:\n            # Log error but continue processing\n            pass\n        \n        # 4. Get DXFeed benchmark market data\n        try:\n            dxfeed_benchmark_raw = _('DXFeed Benchmark Summary Node').all()\n            for item in dxfeed_benchmark_raw:\n                if hasattr(item['json'], 'to_py'):\n                    python_data = item['json'].to_py()\n                else:\n                    python_data = dict(item['json'])\n                \n                # Validate DXFeed data structure\n                if 'data' in python_data and isinstance(python_data['data'], dict):\n                    dxfeed_benchmark_data.append(python_data)\n        except Exception as e:\n            # Log error but continue processing\n            pass\n        \n        # Initialize classified data structure\n        classified_data = {\n            'historical_portfolio': google_sheets_data,\n            'current_market_data': [],\n            'benchmark_data': [],\n            'sp500_data': [],\n            'ticker_list': ticker_data\n        }\n        \n        # Process all DXFeed data and classify by ticker type\n        all_dxfeed_data = dxfeed_portfolio_data + dxfeed_benchmark_data\n        \n        for item in all_dxfeed_data:\n            if 'data' in item and isinstance(item['data'], dict):\n                market_item = item['data']\n                ticker = market_item.get('symbol', '').upper()\n                \n                # Skip invalid tickers\n                if not ticker or ticker in ['BY-TYPE', 'UNKNOWN']:\n                    continue\n                \n                # Standardize market data using DXFeed fields\n                standardized_item = {\n                    'Ticker': ticker,\n                    'Date': market_item.get('summary-date', datetime.now().strftime('%Y-%m-%d')),\n                    # Real OHLC data from DXFeed\n                    'Open': float(market_item.get('open', market_item.get('prev-close', 0))),\n                    'High': float(market_item.get('day-high-price', market_item.get('last', 0))),\n                    'Low': float(market_item.get('day-low-price', market_item.get('last', 0))),  # ✅ Real daily low!\n                    'Close': float(market_item.get('close', market_item.get('last', 0))),\n                    'Volume': 0,  # Not provided in this format\n                    'PrevClose': float(market_item.get('prev-close', 0)),\n                    'HasIntradayData': True,\n                    'DataSource': 'TastyTrade_DXFeed_Direct_Access',\n                    # Additional market data\n                    'Bid': float(market_item.get('bid', 0)),\n                    'Ask': float(market_item.get('ask', 0)),\n                    'Mid': float(market_item.get('mid', 0)),\n                    'Mark': float(market_item.get('mark', 0)),\n                    'YearLow': float(market_item.get('year-low-price', 0)),\n                    'YearHigh': float(market_item.get('year-high-price', 0)),\n                    'InstrumentType': market_item.get('instrument-type', ''),\n                    'UpdatedAt': market_item.get('updated-at', ''),\n                    'IsTradingHalted': market_item.get('is-trading-halted', False)\n                }\n                \n                # Classify by ticker type\n                if ticker in sp500_tickers:\n                    classified_data['sp500_data'].append(standardized_item)\n                elif ticker in benchmarks:\n                    classified_data['benchmark_data'].append(standardized_item)\n                else:\n                    classified_data['current_market_data'].append(standardized_item)\n        \n        # Enhanced debug info\n        debug_info = {\n            \"processing_date\": datetime.now().isoformat(),\n            \"data_access_method\": \"direct_node_access\",\n            \"data_sources\": {\n                \"google_sheets_available\": len(google_sheets_data) > 0,\n                \"ticker_list_available\": len(ticker_data) > 0,\n                \"dxfeed_portfolio_available\": len(dxfeed_portfolio_data) > 0,\n                \"dxfeed_benchmark_available\": len(dxfeed_benchmark_data) > 0,\n                \"total_raw_items\": len(all_dxfeed_data)\n            },\n            \"classified_counts\": {\n                \"historical_portfolio\": len(classified_data['historical_portfolio']),\n                \"current_market_data\": len(classified_data['current_market_data']),\n                \"benchmark_data\": len(classified_data['benchmark_data']),\n                \"sp500_data\": len(classified_data['sp500_data']),\n                \"ticker_list\": len(classified_data['ticker_list'])\n            },\n            \"data_quality\": {\n                \"all_tickers_have_intraday\": True,\n                \"data_source\": \"TastyTrade_DXFeed_Direct_Access_Permanent\"\n            },\n            \"tickers_found\": {\n                \"portfolio\": [item['Ticker'] for item in classified_data['current_market_data']],\n                \"benchmarks\": [item['Ticker'] for item in classified_data['benchmark_data']],\n                \"sp500\": [item['Ticker'] for item in classified_data['sp500_data']]\n            }\n        }\n        \n        # Return classified data in n8n format\n        return [{\n            \"json\": {\n                \"type\": \"classified_data\",\n                **classified_data,\n                \"debug_info\": debug_info\n            }\n        }]\n        \n    except Exception as e:\n        import traceback\n        return [{\n            \"json\": {\n                \"type\": \"error\",\n                \"error\": f\"Data ingestion failed: {str(e)}\",\n                \"traceback\": traceback.format_exc(),\n                \"timestamp\": datetime.now().isoformat()\n            }\n        }]\n\n# Execute the main function\nreturn process_data_ingestion()"
+        "jsCode": "// Data Ingestion Service for n8n Trading Processor\n// Uses named node access to fetch data from previous nodes and handles multiple data formats.\n\n/**\n * Returns the last trading date (Mon–Fri), mapping Sat/Sun -> Fri.\n * @param {Date | null} today - The date to start from. Defaults to current date if null.\n * @returns {Date} The last trading date.\n */\nfunction lastTradingDate(today = null) {\n    let dt = today ? new Date(today) : new Date();\n    dt.setHours(0, 0, 0, 0); // Normalize to start of day\n\n    const dayOfWeek = dt.getDay(); // 0 is Sunday, 1 is Monday, ..., 6 is Saturday\n\n    if (dayOfWeek === 6) { // Saturday\n        dt.setDate(dt.getDate() - 1); // Friday\n    } else if (dayOfWeek === 0) { // Sunday\n        dt.setDate(dt.getDate() - 2); // Friday\n    }\n    return dt;\n}\n\n/**\n * Main data ingestion function for n8n with named node access.\n * @returns {Promise<any[]>} An array of n8n items containing classified data or an error.\n */\nreturn (async function() {\n    try {\n        // --- Initialize data containers ---\n        let currentHoldingsData = [];\n        let portfolioMarketData = [];\n        let benchmarkMarketData = [];\n        let allMarketData = [];\n        let fetchedCashBalance = 0.0;\n\n        // --- Fetch data explicitly from each source node by name ---\n        const holdingsItems = $('Parse Current Holdings').all();\n        currentHoldingsData = holdingsItems.map(i => i.json);\n\n        const portfolioMarketItems = $('Get Portfolio Asset Snapshots').all();\n        const parsedPortfolioData = portfolioMarketItems\n            .filter(item => item.json)\n            .flatMap(item => {\n                const ticker = Object.keys(item.json)[0];\n                const data = item.json[ticker];\n                return { ...data, symbol: ticker };\n            });\n        portfolioMarketData.push(...parsedPortfolioData);\n\n        const benchmarkMarketItems = $('Market Data Benchmark Summary Node').all();\n        const parsedBenchmarkData = benchmarkMarketItems\n            .filter(item => item.json)\n            .flatMap(item => {\n                return Object.keys(item.json).map(ticker => ({\n                    ...item.json[ticker],\n                    symbol: ticker\n                }));\n            });\n        benchmarkMarketData.push(...parsedBenchmarkData);\n\n        const accountSnapshotItems = $('Get Account Snapshot').all();\n        if (accountSnapshotItems.length > 0 && accountSnapshotItems[0].json && accountSnapshotItems[0].json.cash) {\n            fetchedCashBalance = parseFloat(accountSnapshotItems[0].json.cash);\n        }\n\n        // --- Combine all data sources ---\n        allMarketData.push(...portfolioMarketData, ...benchmarkMarketData);\n\n        // --- Process and classify all combined market data ---\n        const seenSymbols = new Set();\n        const uniqueMarketData = allMarketData.filter(item => {\n            const symbol = item.symbol || '';\n            if (!symbol || seenSymbols.has(symbol)) {\n                return false;\n            }\n            seenSymbols.add(symbol);\n            return true;\n        });\n\n        const benchmarks = new Set(['IWO', 'XBI', 'SPY', 'IWM']);\n        const sp500Tickers = new Set(['^GSPC', 'SPY', '^SPX']);\n\n        let classifiedData = {\n            historical_portfolio: currentHoldingsData,\n            current_market_data: [],\n            benchmark_data: [],\n            sp500_data: [],\n            current_cash_balance: fetchedCashBalance,\n        };\n\n        for (const marketItem of uniqueMarketData) {\n            const ticker = (marketItem.symbol || '').toUpperCase();\n            if (!ticker || ['BY-TYPE', 'UNKNOWN'].includes(ticker)) {\n                continue;\n            }\n            \n            const standardizedItem = {\n                Ticker: ticker,\n                Date: marketItem.dailyBar?.t ? new Date(marketItem.dailyBar.t).toISOString().slice(0, 10) : new Date().toISOString().slice(0, 10),\n                Open: parseFloat(marketItem.dailyBar?.o || 0),\n                High: parseFloat(marketItem.dailyBar?.h || 0),\n                Low: parseFloat(marketItem.dailyBar?.l || 0),\n                Close: parseFloat(marketItem.dailyBar?.c || marketItem.latestTrade?.p || 0),\n                Volume: parseFloat(marketItem.dailyBar?.v || 0),\n                PrevClose: parseFloat(marketItem.prevDailyBar?.c || 0),\n                DataSource: 'Alpaca_Snapshot_API',\n            };\n            \n            if (sp500Tickers.has(ticker)) {\n                classifiedData.sp500_data.push(standardizedItem);\n            } else if (benchmarks.has(ticker)) {\n                classifiedData.benchmark_data.push(standardizedItem);\n            } else {\n                classifiedData.current_market_data.push(standardizedItem);\n            }\n        }\n        \n        // --- Return classified data in n8n format ---\n        return [{\n            json: {\n                type: \"classified_data\",\n                ...classifiedData\n            }\n        }];\n        \n    } catch (e) {\n        console.error(`Data ingestion failed: ${e.message}`);\n        return [{\n            json: {\n                type: \"error\",\n                error: `Data ingestion failed: ${e.message}`,\n                traceback: e.stack,\n                timestamp: new Date().toISOString()\n            }\n        }];\n    }\n})();\n"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        1056,
-        -96
+        304,
+        -756
       ],
-      "id": "97f7fe97-4da1-4817-aa75-e0db97411c18",
+      "id": "f14dec47-eca0-438a-8bac-0254080eb44b",
       "name": "Data Ingestion Node",
+      "executeOnce": true
+    },
+    {
+      "parameters": {
+        "jsCode": "/**\n * n8n Trading Portfolio Processor - ENHANCED MODE\n * Uses TastyTrade data (including after-hours) for all price calculations.\n */\n\n// Data Ingestion Service for n8n Trading Processor\n// Permanent version with direct node access for reliable data retrieval.\n// Enhanced debugging for TastyTrade data flow.\n\n/**\n * Returns the last trading date (Mon–Fri), mapping Sat/Sun -> Fri.\n * @param {Date | null} today - The date to start from. Defaults to current date if null.\n * @returns {Date} The last trading date.\n */\nfunction lastTradingDate(today = null) {\n    let dt = today ? new Date(today) : new Date();\n      dt.setHours(0, 0, 0, 0); // Normalize to start of day\n  \n      const dayOfWeek = dt.getDay(); // 0 is Sunday, 1 is Monday, ..., 6 is Saturday\n  \n      if (dayOfWeek === 6) { // Saturday\n          dt.setDate(dt.getDate() - 1); // Friday\n      } else if (dayOfWeek === 0) { // Sunday\n          dt.setDate(dt.getDate() - 2); // Friday\n    }\n    return dt;\n  }\n  \n  // Helper function to safely convert to float (moved to global scope)\n  function safeFloat(value, defaultValue = 0.0) {\n      if (value === null || value === undefined || value === '') {\n          return defaultValue;\n      }\n      const parsed = parseFloat(value);\n      return isNaN(parsed) ? defaultValue : parsed;\n  }\n  \n  // Helper function to safely convert to string (moved to global scope)\n  function safeString(value, defaultValue = \"\") {\n      if (value === null || value === undefined) {\n          return defaultValue;\n      }\n      return String(value).trim();\n  }\n  \n  function processTradingPortfolio() {\n      try {\n          const todayIso = lastTradingDate().toISOString().slice(0, 10); // YYYY-MM-DD format for Date fields\n  \n          // NEW: Create a YYYYMMDD format for UniqueIDs, consistent with historical data\n          const dateObjForId = lastTradingDate();\n          const yearId = dateObjForId.getFullYear();\n          const monthId = (dateObjForId.getMonth() + 1).toString().padStart(2, '0');\n          const dayId = dateObjForId.getDate().toString().padStart(2, '0');\n          const todayYYYYMMDD = `${yearId}${monthId}${dayId}`; // YYYYMMDD format for UniqueIDs\n  \n          // Get input data from Data Ingestion Node\n          const inputItems = $input.all(); // Use n8n's $input.all() to get input data\n  \n          if (!inputItems || inputItems.length === 0) {\n              return [{ json: { error: \"No input data received from Data Ingestion Node\" } }];\n          }\n  \n          // Get the classified data from the first input item\n          const classifiedInput = inputItems[0].json;\n  \n          // Validate that we received classified data by checking for a key field\n          if (!classifiedInput.hasOwnProperty('historical_portfolio')) {\n              return [{\n                  json: {\n                      error: `Expected classified data from Data Ingestion Node, but 'historical_portfolio' is missing.`,\n                      received_data: classifiedInput\n                  }\n              }];\n          }\n  \n          // Extract classified data\n          let historicalPortfolio = classifiedInput.historical_portfolio || [];\n          const currentMarketData = classifiedInput.current_market_data || [];\n          const benchmarkData = classifiedInput.benchmark_data || [];\n          let sp500Data = classifiedInput.sp500_data || [];\n          const debugInfo = classifiedInput.debug_info || {};\n          let currentCashBalance = safeFloat(classifiedInput.cash_balance, 10000.0); // Get cash balance from classified data, default to 10000\n  \n          // NEW: Extract AI recommendations\n          const aiTrades = classifiedInput.ai_trades || [];\n          const aiPortfolioAdjustments = classifiedInput.ai_portfolio_adjustments || [];\n          const aiAnalysis = classifiedInput.ai_analysis || \"No AI analysis provided.\";\n          const aiConfidence = classifiedInput.ai_confidence || null;\n  \n          // Data summary\n          const dataSummary = {\n              historical_portfolio_count: historicalPortfolio.length,\n              current_market_data_count: currentMarketData.length,\n              benchmark_data_count: benchmarkData.length,\n              sp500_data_count: sp500Data.length,\n              market_tickers_found: currentMarketData.map(item => item.Ticker),\n              benchmark_tickers_found: benchmarkData.map(item => item.Ticker),\n              ai_trades_count: aiTrades.length, // NEW\n              ai_adjustments_count: aiPortfolioAdjustments.length // NEW\n          };\n  \n          // Check if we have the required data\n          if (!historicalPortfolio || historicalPortfolio.length === 0) {\n              return [{\n                  json: {\n                      error: \"No current holdings data found in classified input. Ensure 'Parse Current Holdings' is working and connected.\",\n                      debug_info: debugInfo,\n                      data_summary: dataSummary,\n                      received_data_keys: Object.keys(classifiedInput)\n                  }\n              }];\n          }\n\n          // --- Retrieve static stop-loss data ---\n          const staticData = $getWorkflowStaticData('global');\n          const staticStopLossesMap = new Map(staticData.stopLossesMap || []);\n          const staticTakeProfitMap = new Map(staticData.takeProfitMap || []);\n\n          // --- Dynamically add stop-losses for new positions if not already set ---\n          let updatedStaticStopLosses = false;\n          historicalPortfolio.forEach(holding => {\n              const ticker = String(holding.symbol || \"\").toUpperCase();\n              if (ticker && !staticStopLossesMap.has(ticker)) {\n                  // Calculate a default stop-loss (e.g., 10% below average open price)\n                  const defaultStopLoss = safeFloat(holding.average_open_price || holding.current_close_price, 0) * 0.90; // 10% below open/close price\n                  if (defaultStopLoss > 0) { // Only add if a valid default can be calculated\n                      staticStopLossesMap.set(ticker, parseFloat(defaultStopLoss.toFixed(2)));\n                      updatedStaticStopLosses = true;\n                      debugInfo.new_stop_loss_added = debugInfo.new_stop_loss_added || [];\n                      debugInfo.new_stop_loss_added.push({ ticker: ticker, default_stop_loss: parseFloat(defaultStopLoss.toFixed(2)), reason: \"Automatically added for new position\" });\n                  }\n              }\n          });\n          // Explicitly reassign the map if it was updated, to ensure n8n saves changes\n          if (updatedStaticStopLosses) {\n              staticData.stopLossesMap = staticStopLossesMap;\n          }\n\n          // Create a map for quick lookup of current market data\n          const marketDataMap = new Map();\n          currentMarketData.forEach(item => {\n              marketDataMap.set(item.Ticker.toUpperCase(), item);\n          });\n\n          let currentPortfolio = historicalPortfolio.map(holding => {\n              const ticker = String(holding.symbol || \"\").toUpperCase().trim();\n              const shares = safeFloat(holding.quantity || 0);\n              const buyPrice = safeFloat(holding.average_open_price || 0);\n              const costBasis = buyPrice * shares; // Simple cost basis\n\n              // Retrieve stop_loss from the provided map, or default to 0\n              const stopLoss = safeFloat(staticStopLossesMap.get(ticker), 0.0);\n              const takeProfit = safeFloat(staticTakeProfitMap.get(ticker), 0.0);\n\n              // Get current market price from currentMarketData, default to historical close or buy price if not found\n              const marketItem = marketDataMap.get(ticker);\n              const currentPrice = safeFloat(marketItem?.Close || holding.current_close_price || buyPrice);\n              const totalValue = currentPrice * shares;\n              const pnl = totalValue - costBasis;\n\n              return {\n                  ticker: ticker,\n                  shares: shares,\n                  buy_price: buyPrice,\n                  cost_basis: costBasis,\n                  stop_loss: stopLoss,\n                  take_profit: takeProfit,\n                  current_price: currentPrice,\n                  total_value: totalValue,\n                  pnl: pnl,\n                  action: \"HOLD\", // Assume hold for AI unless specifically sold in prev step\n                  unique_id: `${todayYYYYMMDD}${ticker}` // Generate unique ID for this context\n              };\n          });\n\n          let cashBalance = currentCashBalance; // Use the cash balance fetched from API\n  \n            // NEW: Apply AI recommended stop-loss adjustments BEFORE processing positions\n            for (const adjustment of aiPortfolioAdjustments) {\n                if (adjustment.action === \"adjust_stop\") {\n                    const positionToAdjust = currentPortfolio.find(p => p.ticker.toUpperCase() === adjustment.ticker.toUpperCase());\n                    if (positionToAdjust) {\n                        const oldStopLoss = positionToAdjust.stop_loss; // Capture old value first\n                        positionToAdjust.stop_loss = adjustment.new_stop_loss;\n                        // Add a debug message for the adjustment\n                        debugInfo.ai_adjustments = debugInfo.ai_adjustments || [];\n                        debugInfo.ai_adjustments.push({\n                            ticker: adjustment.ticker,\n                            old_stop_loss: oldStopLoss, // Log the captured old value\n                            new_stop_loss: adjustment.new_stop_loss,\n                            reason: adjustment.reason,\n                            status: \"applied\"\n                        });\n                } else {\n                      debugInfo.ai_adjustments = debugInfo.ai_adjustments || [];\n                      debugInfo.ai_adjustments.push({\n                          ticker: adjustment.ticker,\n                          reason: adjustment.reason,\n                          status: \"skipped - position not found\"\n                      });\n                  }\n              } else if (adjustment.action === \"adjust_take_profit\") {\n                const positionToAdjust = currentPortfolio.find(p => p.ticker.toUpperCase() === adjustment.ticker.toUpperCase());\n                if (positionToAdjust) {\n                    const oldTakeProfit = positionToAdjust.take_profit;\n                    positionToAdjust.take_profit = adjustment.new_take_profit;\n                    debugInfo.ai_adjustments = debugInfo.ai_adjustments || [];\n                    debugInfo.ai_adjustments.push({\n                        ticker: adjustment.ticker,\n                        old_take_profit: oldTakeProfit,\n                        new_take_profit: adjustment.new_take_profit,\n                        reason: adjustment.reason,\n                        status: \"applied\"\n                    });\n                } else {\n                    debugInfo.ai_adjustments.push({\n                        ticker: adjustment.ticker,\n                        reason: adjustment.reason,\n                        status: \"skipped - position not found\"\n                    });\n                }\n            }\n          }\n  \n          // Process market data (API Service data - available 24/7)\n          const marketDataDict = {};\n          for (const item of currentMarketData) {\n              const ticker = item.Ticker;\n              // Assuming the item itself contains the OHLCV and Date, similar to how it was used in processPortfolioPositions\n              marketDataDict[ticker] = {\n                  Open: item.Open,\n                  High: item.High,\n                  Low: item.Low,\n                  Close: item.Close,\n                  Volume: item.Volume || 0,\n                  Date: item.Date\n              };\n          }\n  \n          // Process portfolio positions (including stop-loss triggers)\n          let { portfolio: processedPortfolio, cash: interimCash, results: portfolioResults } = processPortfolioPositions(\n              currentPortfolio, cashBalance, marketDataDict\n          );\n  \n          // NEW: Apply AI recommended buy trades AFTER processing existing positions\n          let finalCash = interimCash;\n          for (const trade of aiTrades) {\n              if (trade.action === \"buy\") {\n                  const ticker = trade.ticker.toUpperCase();\n                  const shares = safeFloat(trade.shares, 0);\n                  const price = safeFloat(trade.price, 0);\n                  const stopLoss = safeFloat(trade.stop_loss, 0);\n                  const reason = trade.reason || \"AI recommended buy\";\n  \n                  const costBasis = shares * price;\n                  const totalValue = shares * price; // At purchase, value equals cost\n  \n                  // Basic validation and cash check\n                  if (shares > 0 && price > 0 && finalCash >= totalValue) {\n                      finalCash -= totalValue;\n                      processedPortfolio.push({\n                          ticker: ticker,\n                          shares: shares,\n                          buy_price: price,\n                          cost_basis: costBasis,\n                          stop_loss: stopLoss,\n                          unique_id: `${todayYYYYMMDD}${ticker}`, // Use YYYYMMDD for consistency\n                          current_price: price, // Set current price to purchase price\n                          total_value: totalValue,\n                          pnl: 0, // PnL is 0 at purchase\n                          action: \"BUY - AI Recommendation\"\n                      });\n                      // Add to results for Google Sheet update\n                      portfolioResults.push({\n                          Date: todayIso, Ticker: ticker, Shares: shares,\n                          \"Buy Price\": price, \"Cost Basis\": costBasis, \"Stop Loss\": stopLoss,\n                          \"Current Price\": price, \"Total Value\": totalValue, PnL: 0,\n                          Action: \"BUY - AI Recommendation\", \"Cash Balance\": \"\", \"Total Equity\": \"\",\n                          UniqueID: `${todayYYYYMMDD}${ticker}`,\n                          Reason: reason // Add AI reason\n                      });\n                      // Add debug message\n                      debugInfo.ai_trades_executed = debugInfo.ai_trades_executed || [];\n                      debugInfo.ai_trades_executed.push({\n                          ticker: ticker,\n                          shares: shares,\n                          price: price,\n                          stop_loss: stopLoss,\n                          reason: reason,\n                          status: \"executed\"\n                      });\n                  } else {\n                      debugInfo.ai_trades_executed = debugInfo.ai_trades_executed || [];\n                      debugInfo.ai_trades_executed.push({\n                          ticker: ticker,\n                          shares: shares,\n                          price: price,\n                          stop_loss: stopLoss,\n                          reason: reason,\n                          status: \"skipped\",\n                          message: finalCash < totalValue ? \"Insufficient cash\" : \"Invalid shares or price\"\n                      });\n                  }\n              }\n          }\n          \n          // Ensure that any newly bought positions are also included in the portfolioResults for the TOTAL row calculation\n          // and subsequent Google Sheet updates.\n          // We need to re-calculate totalValue and totalPnL after AI trades and before TOTAL row.\n          \n          // Calculate final portfolio value and PnL directly from the processedPortfolio\n          const finalPortfolioValue = processedPortfolio.reduce((sum, pos) => sum + safeFloat(pos.total_value || 0), 0);\n          // Calculate total PnL from all portfolio updates, including sales\n          const finalPnLFromAllUpdates = portfolioResults.reduce((sum, item) => {\n              if (item.Ticker !== \"TOTAL\") { // Only exclude the TOTAL row itself\n                  return sum + safeFloat(item.PnL || 0);\n              }\n              return sum;\n          }, 0);\n  \n          // Remove the old TOTAL row if it exists before adding the new one\n          portfolioResults = portfolioResults.filter(item => item.Ticker !== \"TOTAL\");\n  \n          // Add the new total row based on updated portfolio and cash\n          const finalTotalEquity = parseFloat((finalPortfolioValue + finalCash).toFixed(2));\n          const finalTotalRow = {\n              Date: todayIso, Ticker: \"TOTAL\", Shares: \"\", \"Buy Price\": \"\",\n              \"Cost Basis\": \"\", \"Stop Loss\": \"\", \"Current Price\": \"\",\n              \"Total Value\": parseFloat(finalPortfolioValue.toFixed(2)), PnL: parseFloat(finalPnLFromAllUpdates.toFixed(2)),\n              Action: \"\", \"Cash Balance\": parseFloat(finalCash.toFixed(2)), \"Total Equity\": finalTotalEquity,\n              UniqueID: `${todayYYYYMMDD}TOTAL`\n          };\n          portfolioResults.push(finalTotalRow);\n  \n  \n          // Combine all market data for performance metrics\n          const allMarketDict = { ...marketDataDict };\n  \n          // Add benchmark data if available\n          for (const item of benchmarkData) {\n              const ticker = item.Ticker;\n              allMarketDict[ticker] = {\n                  Open: item.Open,\n                  High: item.High,\n                  Low: item.Low,\n                  Close: item.Close,\n                  Volume: item.Volume || 0,\n                  Date: item.Date\n              };\n          }\n  \n          // Process S&P 500 data\n          let sp500ProcessedData = [];\n          if (sp500Data && sp500Data.length > 0) {\n              sp500ProcessedData = sp500Data.map(item => ({\n                  ...item,\n                  Date: new Date(item.Date)\n              })).sort((a, b) => a.Date.getTime() - b.Date.getTime());\n          }\n  \n          // Calculate performance metrics\n          const performanceMetrics = calculatePerformanceMetrics(\n              historicalPortfolio, // Pass original historicalPortfolio as array of objects\n              portfolioResults, // Use the updated portfolioResults for metrics\n              allMarketDict,\n              sp500ProcessedData, // Pass processed S&P 500 data\n              10000.0 // Default starting equity\n          );\n  \n          // Return results in proper n8n format\n          const results = [];\n  \n          // Add each portfolio update as a separate item\n          for (const update of portfolioResults) {\n              results.push({ json: { type: \"portfolio_update\", ...update } });\n          }\n  \n          // Add AI analysis as a separate item (NEW)\n          results.push({ json: { type: \"ai_analysis_summary\", analysis: aiAnalysis, confidence: aiConfidence } });\n  \n          // Add performance metrics as a separate item\n          results.push({ json: { type: \"performance_metrics\", ...performanceMetrics } });\n  \n          // Add updated portfolio state (use processedPortfolio which includes AI buys)\n          if (processedPortfolio && processedPortfolio.length > 0) {\n              for (const row of processedPortfolio) {\n                  // Ensure this output also reflects the correct values after processing\n                  // and AI trades/adjustments.\n                   const finalPositionState = {\n                      ticker: row.ticker,\n                      shares: row.shares,\n                      buy_price: row.buy_price,\n                      cost_basis: row.cost_basis,\n                      stop_loss: row.stop_loss,\n                      current_price: row.current_price, // Should be updated during processing\n                      total_value: row.total_value,      // Should be updated during processing\n                      pnl: row.pnl,                      // Should be updated during processing\n                      action: row.action,\n                      unique_id: row.unique_id\n                  };\n                  results.push({ json: { type: \"portfolio_state\", ...finalPositionState } });\n              }\n          }\n  \n  \n          // Add summary item with debug info\n          results.push({\n              json: {\n                  type: \"summary\",\n                  portfolio_updates_count: portfolioResults.length,\n                  final_cash_balance: finalCash,\n                  processing_date: new Date().toISOString(),\n                  debug_info: debugInfo,\n                  data_summary: dataSummary,\n                  market_data_tickers: Object.keys(marketDataDict),\n                  data_source: \"TastyTrade_Enhanced_Mode\", // Updated to indicate enhanced mode\n                  success: true\n              }\n          });\n  \n          return results;\n  \n      } catch (e) {\n          return [{\n              json: {\n                  error: `Processing failed: ${e.message}`,\n                  type: \"error\",\n                  traceback: e.stack, // In JS, stack provides similar info to traceback\n                  input_data_available: (typeof inputItems !== 'undefined' ? inputItems.length : 0)\n              }\n          }];\n      }\n  }\n  \n  // The 'extractCurrentPortfolio' function has been removed as data is now directly ingested from TastyTrade API.\n  // This streamlines the data flow and eliminates the need for Google Sheet specific parsing.\n  \n  // The `processPortfolioPositions` function needs to be aware of the *current* stop_loss\n  // values which might have been adjusted by the AI. We don't need to change its signature\n  // as `portfolio` already contains the adjusted stop losses.\n  // We also need to ensure that when we update currentPortfolio after a sell,\n  // we are actually returning the modified portfolio.\n  function processPortfolioPositions(portfolio, cash, marketData) {\n      const todayIso = lastTradingDate().toISOString().slice(0, 10); // YYYY-MM-DD format\n      let results = [];\n      let currentPortfolio = [...portfolio]; // Create a mutable copy of the portfolio (includes AI adjustments)\n      let currentCash = cash;\n  \n      let totalValue = 0.0;\n      let totalPnL = 0.0;\n  \n      // Process each position\n      let remainingPortfolio = []; // To build the portfolio after sells\n      for (const position of currentPortfolio) {\n          const ticker = String(position.ticker || \"\").toUpperCase();\n  \n          const shares = safeFloat(position.shares, 0);\n          const buyPrice = safeFloat(position.buy_price, 0.0);\n          const costBasis = safeFloat(position.cost_basis, buyPrice * shares);\n          const stopLoss = safeFloat(position.stop_loss, 0.0); // Use potentially adjusted stop-loss\n          const takeProfit = safeFloat(position.take_profit, 0.0); // Get take-profit\n          const uniqueId = String(position.unique_id || \"\");\n  \n          // Skip empty ticker rows\n          if (!ticker) {\n              continue; // Skip if ticker is empty or null\n          }\n  \n          // Get market data for this ticker\n          const tickerData = marketData[ticker]; // marketData is now an object of objects\n  \n          if (!tickerData || Object.keys(tickerData).length === 0) {\n              // Only show error if TastyTrade data is completely unavailable\n              const result = {\n                  Date: todayIso, Ticker: ticker, Shares: shares,\n                  \"Buy Price\": buyPrice, \"Cost Basis\": costBasis, \"Stop Loss\": stopLoss,\n                  \"Current Price\": \"\", \"Total Value\": \"\", PnL: \"\",\n                  Action: \"ERROR - NO TASTYTRADE DATA\", \"Cash Balance\": \"\", \"Total Equity\": \"\",\n                  UniqueID: uniqueId\n              };\n              results.push(result);\n              remainingPortfolio.push(position); // Keep in portfolio if no data\n              continue;\n          }\n  \n          // Get OHLC data from TastyTrade (available after hours and weekends)\n          // Assuming tickerData is already the latest data object (not a DataFrame)\n          const openPrice = safeFloat(tickerData.Open || tickerData.Close, 0);\n          const highPrice = safeFloat(tickerData.High || tickerData.Close, 0);\n          const lowPrice = safeFloat(tickerData.Low || tickerData.Close, 0);\n          const closePrice = safeFloat(tickerData.Close, 0);\n  \n          let action = \"HOLD\"; // Default to HOLD\n          let execPrice = closePrice; // Default to close price\n          let value;\n          let pnl;\n  \n          // Check for stop loss trigger using daily low price\n          if (stopLoss > 0 && lowPrice <= stopLoss) {\n              action = \"SELL - Stop Loss Triggered\";\n              execPrice = Math.min(openPrice, stopLoss); // Execute at stop loss or open if below\n              execPrice = parseFloat(execPrice.toFixed(2));\n              value = parseFloat((execPrice * shares).toFixed(2));\n              pnl = parseFloat(((execPrice - buyPrice) * shares).toFixed(2));\n              currentCash += value;\n              // Position is sold, do not add to remainingPortfolio\n          } else if (takeProfit > 0 && highPrice >= takeProfit) {\n              action = \"SELL - Take Profit Triggered\";\n              execPrice = Math.max(openPrice, takeProfit); // Execute at take profit or open if gapped up\n              execPrice = parseFloat(execPrice.toFixed(2));\n              value = parseFloat((execPrice * shares).toFixed(2));\n              pnl = parseFloat(((execPrice - buyPrice) * shares).toFixed(2));\n              currentCash += value;\n              // Position is sold, do not add to remainingPortfolio\n          } else {\n              // Stop loss not triggered - use TastyTrade close price\n              execPrice = parseFloat(closePrice.toFixed(2));\n              value = parseFloat((execPrice * shares).toFixed(2));\n              pnl = parseFloat(((execPrice - buyPrice) * shares).toFixed(2));\n              // Update the position object with current market data\n              position.current_price = execPrice;\n              position.total_value = value;\n              position.pnl = pnl;\n              remainingPortfolio.push(position); // Keep in portfolio\n          }\n  \n          // For HOLD actions, add to total_value and total_pnl\n          if (action === \"HOLD\") {\n              totalValue += value;\n              totalPnL += pnl;\n          }\n  \n          const result = {\n              Date: todayIso, Ticker: ticker, Shares: shares,\n              \"Buy Price\": buyPrice, \"Cost Basis\": costBasis, \"Stop Loss\": stopLoss, \"Take Profit\": takeProfit,\n              \"Current Price\": execPrice, \"Total Value\": value, PnL: pnl,\n              Action: action, \"Cash Balance\": \"\", \"Total Equity\": \"\",\n              UniqueID: uniqueId\n          };\n          results.push(result);\n      }\n  \n      // Add total row\n      const totalEquity = parseFloat((totalValue + currentCash).toFixed(2));\n      const totalRow = {\n          Date: todayIso, Ticker: \"TOTAL\", Shares: \"\", \"Buy Price\": \"\",\n          \"Cost Basis\": \"\", \"Stop Loss\": \"\", \"Current Price\": \"\",\n          \"Total Value\": parseFloat(totalValue.toFixed(2)), PnL: parseFloat(totalPnL.toFixed(2)),\n          Action: \"\", \"Cash Balance\": parseFloat(currentCash.toFixed(2)), \"Total Equity\": totalEquity,\n          UniqueID: `${todayIso}TOTAL`\n      };\n      results.push(totalRow);\n  \n      // Return the remaining portfolio (after sells) and the updated cash\n      return { portfolio: remainingPortfolio, cash: currentCash, results: results };\n  }\n  \n  function calculatePerformanceMetrics(historicalPortfolio, currentResults, marketData, sp500Data, startingEquity) {\n      /**Calculate basic performance metrics. */\n      const todayIso = lastTradingDate().toISOString().slice(0, 10);\n  \n      // Get current equity\n      let currentEquity = startingEquity;\n      let cashBalance = 0.0;\n  \n      if (currentResults) {\n          const totalRow = currentResults.find(r => r.Ticker === \"TOTAL\");\n          if (totalRow) {\n              currentEquity = totalRow[\"Total Equity\"] || startingEquity;\n              cashBalance = totalRow[\"Cash Balance\"] || 0.0;\n          }\n      }\n  \n      // Basic metrics\n      return {\n          date: todayIso,\n          current_equity: currentEquity,\n          cash_balance: cashBalance,\n          total_positions: currentResults.filter(r => r.Ticker !== \"TOTAL\").length,\n          positions_with_data: currentResults.filter(r => r.Action !== \"ERROR - NO TASTYTRADE DATA\" && r.Ticker !== \"TOTAL\").length,\n          positions_without_data: currentResults.filter(r => r.Action === \"ERROR - NO TASTYTRADE DATA\").length,\n          data_source: \"TastyTrade_Enhanced_Mode\"\n      };\n  }\n  \n  // Execute the main function\n  return processTradingPortfolio();\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1552,
+        -752
+      ],
+      "id": "c4f2d993-81fa-48f4-828a-d53a36cd2988",
+      "name": "Portfolio Processing Node",
       "executeOnce": false
-    },
-    {
-      "parameters": {
-        "language": "python",
-        "pythonCode": "\"\"\"\nn8n Trading Portfolio Processor - STRICT MODE\nNo fallback data - requires real-time market data for all positions.\n\"\"\"\n\nimport pandas as pd\nimport numpy as np\nimport json\nfrom datetime import datetime, timedelta\nimport warnings\n\n# Suppress warnings for cleaner output\nwarnings.filterwarnings('ignore')\n\ndef last_trading_date(today=None):\n    \"\"\"Return last trading date (Mon–Fri), mapping Sat/Sun -> Fri.\"\"\"\n    dt = pd.Timestamp(today or datetime.now())\n    if dt.weekday() == 5:  # Sat -> Fri\n        return (dt - pd.Timedelta(days=1)).normalize()\n    if dt.weekday() == 6:  # Sun -> Fri\n        return (dt - pd.Timedelta(days=2)).normalize()\n    return dt.normalize()\n\ndef process_trading_portfolio():\n    try:\n        # Get input data from Data Ingestion Node\n        input_items = _input.all()\n        \n        if not input_items:\n            return [{\"json\": {\"error\": \"No input data received from Data Ingestion Node\"}}]\n        \n        # Get the classified data from the first input item\n        classified_input = input_items[0]['json']\n        \n        # Validate that we received classified data\n        if classified_input.get(\"type\") != \"classified_data\":\n            return [{\"json\": {\n                \"error\": f\"Expected classified data from Data Ingestion Node, got type: {classified_input.get('type', 'unknown')}\",\n                \"received_data\": classified_input\n            }}]\n        \n        # Extract classified data\n        historical_portfolio = classified_input.get('historical_portfolio', [])\n        current_market_data = classified_input.get('current_market_data', [])\n        benchmark_data = classified_input.get('benchmark_data', [])\n        sp500_data = classified_input.get('sp500_data', [])\n        debug_info = classified_input.get('debug_info', {})\n        \n        # Data summary\n        data_summary = {\n            \"historical_portfolio_count\": len(historical_portfolio),\n            \"current_market_data_count\": len(current_market_data),\n            \"benchmark_data_count\": len(benchmark_data),\n            \"sp500_data_count\": len(sp500_data),\n            \"market_tickers_found\": [item['Ticker'] for item in current_market_data],\n            \"benchmark_tickers_found\": [item['Ticker'] for item in benchmark_data]\n        }\n        \n        # Check if we have the required data\n        if not historical_portfolio:\n            return [{\"json\": {\n                \"error\": \"No Google Sheets portfolio data found in classified input\",\n                \"debug_info\": debug_info,\n                \"data_summary\": data_summary,\n                \"received_data_keys\": list(classified_input.keys())\n            }}]\n        \n        # Convert historical portfolio to DataFrame\n        hist_df = pd.DataFrame(historical_portfolio)\n        \n        # Clean up the data - remove row_number column if present\n        if 'row_number' in hist_df.columns:\n            hist_df = hist_df.drop('row_number', axis=1)\n        \n        # Extract current portfolio state\n        current_portfolio, cash_balance = extract_current_portfolio(hist_df)\n        \n        # Process market data (STRICT MODE - API data only)\n        market_data_dict = {}\n        for item in current_market_data:\n            ticker = item['Ticker']\n            df_data = {\n                'Open': [item['Open']],\n                'High': [item['High']], \n                'Low': [item['Low']],\n                'Close': [item['Close']],\n                'Volume': [item.get('Volume', 0)],\n                'Date': [item['Date']]\n            }\n            df = pd.DataFrame(df_data)\n            df['Date'] = pd.to_datetime(df['Date'])\n            df = df.set_index('Date')\n            market_data_dict[ticker] = df\n        \n        # Process portfolio positions\n        updated_portfolio, final_cash, portfolio_results = process_portfolio_positions(\n            current_portfolio, cash_balance, market_data_dict\n        )\n        \n        # Combine all market data for performance metrics\n        all_market_dict = market_data_dict.copy()\n        \n        # Add benchmark data if available\n        for item in benchmark_data:\n            ticker = item['Ticker']\n            df_data = {\n                'Open': [item['Open']],\n                'High': [item['High']], \n                'Low': [item['Low']],\n                'Close': [item['Close']],\n                'Volume': [item.get('Volume', 0)],\n                'Date': [item['Date']]\n            }\n            df = pd.DataFrame(df_data)\n            df['Date'] = pd.to_datetime(df['Date'])\n            df = df.set_index('Date')\n            all_market_dict[ticker] = df\n        \n        # Process S&P 500 data\n        sp500_df = pd.DataFrame()\n        if sp500_data:\n            sp500_df = pd.DataFrame(sp500_data)\n            if 'Date' in sp500_df.columns:\n                sp500_df['Date'] = pd.to_datetime(sp500_df['Date'])\n                sp500_df = sp500_df.set_index('Date').sort_index()\n        \n        # Calculate performance metrics\n        performance_metrics = calculate_performance_metrics(\n            hist_df,\n            portfolio_results, \n            all_market_dict,\n            sp500_df,\n            10000.0  # Default starting equity\n        )\n        \n        # Return results in proper n8n format\n        results = []\n        \n        # Add each portfolio update as a separate item\n        for update in portfolio_results:\n            results.append({\"json\": {\"type\": \"portfolio_update\", **update}})\n        \n        # Add performance metrics as a separate item\n        results.append({\"json\": {\"type\": \"performance_metrics\", **performance_metrics}})\n        \n        # Add updated portfolio state\n        if not updated_portfolio.empty:\n            for _, row in updated_portfolio.iterrows():\n                results.append({\"json\": {\"type\": \"portfolio_state\", **row.to_dict()}})\n        \n        # Add summary item with debug info\n        results.append({\"json\": {\n            \"type\": \"summary\",\n            \"portfolio_updates_count\": len(portfolio_results),\n            \"final_cash_balance\": final_cash,\n            \"processing_date\": datetime.now().isoformat(),\n            \"debug_info\": debug_info,\n            \"data_summary\": data_summary,\n            \"market_data_tickers\": list(market_data_dict.keys()),\n            \"strict_mode\": True,  # Indicates no fallback data used\n            \"success\": True\n        }})\n        \n        return results\n        \n    except Exception as e:\n        import traceback\n        return [{\"json\": {\n            \"error\": f\"Processing failed: {str(e)}\", \n            \"type\": \"error\",\n            \"traceback\": traceback.format_exc(),\n            \"input_data_available\": len(input_items) if 'input_items' in locals() else 0\n        }}]\n\ndef extract_current_portfolio(historical_df):\n    \"\"\"Extract current portfolio state from historical data.\"\"\"\n    if historical_df.empty:\n        return pd.DataFrame(columns=[\"ticker\", \"shares\", \"stop_loss\", \"buy_price\", \"cost_basis\"]), 10000.0\n    \n    # Get non-TOTAL rows for the latest date\n    non_total = historical_df[historical_df[\"Ticker\"] != \"TOTAL\"].copy()\n    if non_total.empty:\n        return pd.DataFrame(columns=[\"ticker\", \"shares\", \"stop_loss\", \"buy_price\", \"cost_basis\"]), 10000.0\n    \n    non_total[\"Date\"] = pd.to_datetime(non_total[\"Date\"], errors='coerce')\n    latest_date = non_total[\"Date\"].max()\n    latest_holdings = non_total[non_total[\"Date\"] == latest_date].copy()\n    \n    # Remove sold positions\n    if 'Action' in latest_holdings.columns:\n        sold_mask = latest_holdings[\"Action\"].astype(str).str.startswith(\"SELL\")\n        current_holdings = latest_holdings[~sold_mask].copy()\n    else:\n        current_holdings = latest_holdings.copy()\n    \n    # Format for processing - handle the actual column names from your Google Sheet\n    column_mapping = {\n        \"Ticker\": \"ticker\",\n        \"Shares\": \"shares\", \n        \"Buy Price\": \"buy_price\",\n        \"Cost Basis\": \"cost_basis\",\n        \"Stop Loss\": \"stop_loss\"\n    }\n    \n    # Rename columns that exist\n    existing_columns = [col for col in column_mapping.keys() if col in current_holdings.columns]\n    portfolio = current_holdings[existing_columns].rename(columns=column_mapping)\n    \n    # Ensure all required columns exist\n    required_columns = [\"ticker\", \"shares\", \"buy_price\", \"cost_basis\", \"stop_loss\"]\n    for col in required_columns:\n        if col not in portfolio.columns:\n            portfolio[col] = 0.0 if col != \"ticker\" else \"\"\n    \n    portfolio = portfolio[required_columns]\n    \n    # Get current cash balance from TOTAL rows\n    total_rows = historical_df[historical_df[\"Ticker\"] == \"TOTAL\"].copy()\n    if not total_rows.empty and 'Cash Balance' in total_rows.columns:\n        total_rows[\"Date\"] = pd.to_datetime(total_rows[\"Date\"], errors='coerce')\n        latest_total = total_rows.sort_values(\"Date\").iloc[-1]\n        cash = float(latest_total[\"Cash Balance\"]) if pd.notna(latest_total[\"Cash Balance\"]) and latest_total[\"Cash Balance\"] != \"\" else 10000.0\n    else:\n        # Estimate cash from total equity minus current positions value\n        if not current_holdings.empty and 'Total Value' in current_holdings.columns:\n            total_position_value = current_holdings['Total Value'].sum()\n            cash = max(0, 10000.0 - total_position_value)  # Rough estimate\n        else:\n            cash = 10000.0\n    \n    return portfolio, cash\n\ndef process_portfolio_positions(portfolio, cash, market_data):\n    \"\"\"Process portfolio positions and execute stop losses - STRICT MODE.\"\"\"\n    today_iso = last_trading_date().date().isoformat()\n    results = []\n    total_value = 0.0\n    total_pnl = 0.0\n    \n    # Process each position\n    for _, position in portfolio.iterrows():\n        ticker = str(position[\"ticker\"]).upper()\n        \n        # Helper function to safely convert to float\n        def safe_float(value, default=0.0):\n            if pd.isna(value) or value == '' or value is None:\n                return default\n            try:\n                return float(value)\n            except (ValueError, TypeError):\n                return default\n        \n        shares = safe_float(position[\"shares\"], 0)\n        buy_price = safe_float(position[\"buy_price\"], 0.0)\n        cost_basis = safe_float(position[\"cost_basis\"], buy_price * shares)\n        stop_loss = safe_float(position[\"stop_loss\"], 0.0)\n        \n        # Skip empty ticker rows\n        if not ticker or ticker == \"NAN\":\n            continue\n        \n        # Get market data for this ticker - STRICT MODE: API data only\n        ticker_data = market_data.get(ticker, pd.DataFrame())\n        \n        if ticker_data.empty:\n            # STRICT MODE: No fallback data, flag as error\n            result = {\n                \"Date\": today_iso, \"Ticker\": ticker, \"Shares\": shares,\n                \"Buy Price\": buy_price, \"Cost Basis\": cost_basis, \"Stop Loss\": stop_loss,\n                \"Current Price\": \"\", \"Total Value\": \"\", \"PnL\": \"\",\n                \"Action\": \"ERROR - NO REAL-TIME DATA\", \"Cash Balance\": \"\", \"Total Equity\": \"\"\n            }\n            results.append(result)\n            continue\n        \n        # Get OHLC data\n        latest_data = ticker_data.iloc[-1]\n        open_price = latest_data.get(\"Open\", latest_data.get(\"Close\", 0))\n        high_price = latest_data.get(\"High\", latest_data.get(\"Close\", 0))\n        low_price = latest_data.get(\"Low\", latest_data.get(\"Close\", 0))\n        close_price = latest_data.get(\"Close\", 0)\n        \n        # Check for stop loss trigger using real daily low price\n        # Stop loss triggered\n        if stop_loss > 0 and low_price <= stop_loss:\n            exec_price = min(open_price, stop_loss) if open_price <= stop_loss else stop_loss\n            exec_price = round(exec_price, 2)\n            value = round(exec_price * shares, 2)\n            pnl = round((exec_price - buy_price) * shares, 2)\n            cash += value\n            portfolio = portfolio[portfolio[\"ticker\"] != ticker]\n            \n            result = {\n                \"Date\": today_iso, \"Ticker\": ticker, \"Shares\": shares,\n                \"Buy Price\": buy_price, \"Cost Basis\": cost_basis, \"Stop Loss\": stop_loss,\n                \"Current Price\": exec_price, \"Total Value\": value, \"PnL\": pnl,\n                \"Action\": \"SELL - Stop Loss Triggered\", \"Cash Balance\": \"\", \"Total Equity\": \"\"\n            }\n        else:\n            # Stop loss not triggered\n            current_price = round(close_price, 2)\n            value = round(current_price * shares, 2)\n            pnl = round((current_price - buy_price) * shares, 2)\n            total_value += value\n            total_pnl += pnl\n            \n            result = {\n                \"Date\": today_iso, \"Ticker\": ticker, \"Shares\": shares,\n                \"Buy Price\": buy_price, \"Cost Basis\": cost_basis, \"Stop Loss\": stop_loss,\n                \"Current Price\": current_price, \"Total Value\": value, \"PnL\": pnl,\n                \"Action\": \"HOLD\", \"Cash Balance\": \"\", \"Total Equity\": \"\"\n            }\n        \n        results.append(result)\n    \n    # Add total row\n    total_equity = total_value + cash\n    total_row = {\n        \"Date\": today_iso, \"Ticker\": \"TOTAL\", \"Shares\": \"\", \"Buy Price\": \"\",\n        \"Cost Basis\": \"\", \"Stop Loss\": \"\", \"Current Price\": \"\",\n        \"Total Value\": round(total_value, 2), \"PnL\": round(total_pnl, 2),\n        \"Action\": \"\", \"Cash Balance\": round(cash, 2), \"Total Equity\": round(total_equity, 2)\n    }\n    results.append(total_row)\n    \n    return portfolio, cash, results\n\ndef calculate_performance_metrics(historical_df, current_results, market_data, sp500_df, starting_equity):\n    \"\"\"Calculate basic performance metrics.\"\"\"\n    today_iso = last_trading_date().date().isoformat()\n    \n    # Get current equity\n    current_equity = 10000.0\n    cash_balance = 0.0\n    \n    if current_results:\n        total_row = next((r for r in current_results if r[\"Ticker\"] == \"TOTAL\"), None)\n        if total_row:\n            current_equity = total_row.get(\"Total Equity\", 10000.0)\n            cash_balance = total_row.get(\"Cash Balance\", 0.0)\n    \n    # Basic metrics\n    return {\n        \"date\": today_iso,\n        \"current_equity\": current_equity,\n        \"cash_balance\": cash_balance,\n        \"total_positions\": len([r for r in current_results if r[\"Ticker\"] != \"TOTAL\"]),\n        \"positions_with_data\": len([r for r in current_results if r[\"Action\"] != \"ERROR - NO REAL-TIME DATA\" and r[\"Ticker\"] != \"TOTAL\"]),\n        \"positions_without_data\": len([r for r in current_results if r[\"Action\"] == \"ERROR - NO REAL-TIME DATA\"]),\n        \"strict_mode\": True\n    }\n\n# Execute the main function\nreturn process_trading_portfolio()\n"
-      },
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [
-        1280,
-        -96
-      ],
-      "id": "8eedec64-a10b-4a9a-ba54-1bcf9300f002",
-      "name": "Portfolio Processing Node"
-    },
-    {
-      "parameters": {
-        "jsCode": "const ticker = [\n  \"IWO\", \"XBI\", \"SPY\", \"IWM\"\n  // (Add more if needed up to 100)\n];\n\n\n\nreturn ticker.map(ticker => ({\n  json: { ticker }\n}));"
-      },
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [
-        176,
-        0
-      ],
-      "id": "15f7f35d-19ee-451e-a47c-0033fb15ab10",
-      "name": "Code in JavaScript"
-    },
-    {
-      "parameters": {
-        "content": "## Flow Overview\n\n[Manual Trigger] → [Google Sheets] → [Parse Tickers] → [DXFeed Portfolio] → \\\\\n                                                                              [Data Ingestion] → [Portfolio Processing] → [Google Sheets Update] → [AI Prompt Generator] → [OpenAI API] → [Trade Execution] → [Final Output]\n[Manual Trigger] → [JavaScript Code] → [DXFeed Benchmark] → /",
-        "width": 816
-      },
-      "type": "n8n-nodes-base.stickyNote",
-      "position": [
-        -736,
-        -464
-      ],
-      "typeVersion": 1,
-      "id": "a1ea8da9-1133-4291-a9b5-a6228d5bc2c6",
-      "name": "Sticky Note"
     },
     {
       "parameters": {
@@ -119,78 +50,16 @@
       },
       "type": "n8n-nodes-base.stickyNote",
       "position": [
-        -736,
-        -272
+        1808,
+        -432
       ],
       "typeVersion": 1,
-      "id": "609313b1-0543-4c49-8f14-b78cab5c1067",
+      "id": "434f1cfd-66ae-4831-8099-818f76d261f1",
       "name": "Sticky Note1"
     },
     {
       "parameters": {
-        "url": "https://api.cert.tastyworks.com/market-data/summary",
-        "authentication": "genericCredentialType",
-        "genericAuthType": "oAuth2Api",
-        "sendQuery": true,
-        "queryParameters": {
-          "parameters": [
-            {
-              "name": "symbol",
-              "value": "={{ $json.ticker }}"
-            }
-          ]
-        },
-        "options": {}
-      },
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.2,
-      "position": [
-        400,
-        0
-      ],
-      "id": "5c24a613-1be0-49cc-aa14-b75cd5f21c1d",
-      "name": "DXFeed Benchmark Summary Node",
-      "credentials": {
-        "oAuth2Api": {
-          "id": "gxoqknGoeXQJ2HXn",
-          "name": "TastyTrade Sandbox"
-        }
-      }
-    },
-    {
-      "parameters": {
-        "url": "https://api.cert.tastyworks.com/market-data/summary",
-        "authentication": "genericCredentialType",
-        "genericAuthType": "oAuth2Api",
-        "sendQuery": true,
-        "queryParameters": {
-          "parameters": [
-            {
-              "name": "symbol",
-              "value": "={{ $json.ticker }}"
-            }
-          ]
-        },
-        "options": {}
-      },
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.2,
-      "position": [
-        400,
-        -192
-      ],
-      "id": "9c640e7c-0dbc-41f1-b047-9cabd4849cd0",
-      "name": "DXFeed Portfolio Summary Node",
-      "credentials": {
-        "oAuth2Api": {
-          "id": "gxoqknGoeXQJ2HXn",
-          "name": "TastyTrade Sandbox"
-        }
-      }
-    },
-    {
-      "parameters": {
-        "operation": "appendOrUpdate",
+        "operation": "append",
         "documentId": {
           "__rl": true,
           "value": "1bSlvPjjCLtnlrxW9o7UgQtxEyudEsJsNuWjZYxf43_4",
@@ -200,16 +69,16 @@
         },
         "sheetName": {
           "__rl": true,
-          "value": 1512288185,
+          "value": 415636544,
           "mode": "list",
           "cachedResultName": "portfolio_update",
-          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1bSlvPjjCLtnlrxW9o7UgQtxEyudEsJsNuWjZYxf43_4/edit#gid=1512288185"
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1bSlvPjjCLtnlrxW9o7UgQtxEyudEsJsNuWjZYxf43_4/edit#gid=415636544"
         },
         "columns": {
           "mappingMode": "defineBelow",
           "value": {
-            "Date": "= {{ $json.Date }}",
-            "Ticker": "= {{ $json.Ticker }}",
+            "Date": "={{ $today.toLocaleString() }}",
+            "Ticker": "={{ $json.symbol }}",
             "Shares": "={{ $json.Shares }}",
             "Buy Price": "={{ $json[\"Buy Price\"] }}",
             "Cost Basis": "={{ $json[\"Cost Basis\"] }}",
@@ -219,7 +88,8 @@
             "PnL": "={{ $json.PnL }}",
             "Action": "={{ $json.Action }}",
             "Cash Balance": "={{ $json[\"Cash Balance\"] }}",
-            "Total Equity": "={{ $json[\"Total Equity\"] }}"
+            "Total Equity": "={{ $json[\"Total Equity\"] }}",
+            "Buy Date": "={{ $json[\"Buy Date\"] }}"
           },
           "matchingColumns": [
             "Date"
@@ -242,7 +112,8 @@
               "defaultMatch": false,
               "display": true,
               "type": "string",
-              "canBeUsedToMatch": true
+              "canBeUsedToMatch": true,
+              "removed": false
             },
             {
               "id": "Shares",
@@ -252,6 +123,16 @@
               "display": true,
               "type": "string",
               "canBeUsedToMatch": true
+            },
+            {
+              "id": "Buy Date",
+              "displayName": "Buy Date",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
             },
             {
               "id": "Buy Price",
@@ -343,10 +224,10 @@
       "type": "n8n-nodes-base.googleSheets",
       "typeVersion": 4.7,
       "position": [
-        1424,
-        -448
+        3792,
+        -756
       ],
-      "id": "5351e49b-006b-4983-ad8a-fb1c87dcd3fe",
+      "id": "fd398aef-166d-478c-b400-dca133aa1cf8",
       "name": "Update Google Sheet with Latest Position",
       "credentials": {
         "googleSheetsOAuth2Api": {
@@ -357,97 +238,622 @@
     },
     {
       "parameters": {
-        "jsCode": "// Extract data from n8n input array\nconst items = $input.all();\n\n// Find the TOTAL row for cash and equity\nconst totalRow = items.find(item => item.json.Ticker && item.json.Ticker.trim() === 'TOTAL');\n\n// Count active positions (HOLD actions, excluding TOTAL)\nconst activePositions = items.filter(item => \n  item.json.Ticker && \n  item.json.Ticker.trim() !== 'TOTAL' && \n  item.json.Action === 'HOLD'\n);\n\n// Extract values - these DO exist in your TOTAL row\nconst cash = totalRow ? (totalRow.json['Cash Balance'] || 0) : 0;\nconst equity = totalRow ? (totalRow.json['Total Equity'] || 0) : 0;\nconst positions = activePositions.length;\n// Use the portfolio date, not today's date\nconst date = items[0]?.json.Date?.trim() || new Date().toISOString().split('T')[0];\n\n// Calculate portfolio performance metrics\nconst totalPnL = totalRow ? (totalRow.json.PnL || 0) : 0;\nconst startingEquity = 10000; // Assuming $10k start\nconst totalReturn = ((equity - startingEquity) / startingEquity * 100).toFixed(1);\n\n// Build enhanced holdings text with stop losses and allocation percentages\nconst holdingsText = activePositions.map(item => {\n  const ticker = item.json.Ticker?.trim() || 'UNKNOWN';\n  const shares = item.json.Shares || 0;\n  const buyPrice = item.json['Buy Price'] || 0;\n  const currentPrice = item.json['Current Price'] || 0;\n  const stopLoss = item.json['Stop Loss'] || 0;\n  const pnl = item.json.PnL || 0;\n  const positionValue = currentPrice * shares;\n  const allocationPct = equity > 0 ? ((positionValue / equity) * 100).toFixed(1) : 0;\n  \n  return `${ticker}: ${shares} shares @ $${currentPrice} (Buy: $${buyPrice}, Stop: $${stopLoss}, P&L: $${pnl}, ${allocationPct}% allocation)`;\n}).join('\\n') || 'No current holdings';\n\n// Build recent activity context (basic version - could be enhanced with historical data)\nconst recentActivityText = `Portfolio up $${totalPnL} (${totalReturn}%) from cost basis\\nCurrent Strategy: Holding micro-cap positions with stop losses`;\n\nconst prompt = `You are a professional portfolio analyst. Here is your current portfolio state as of ${date}:\n\n[ Holdings ]\n${holdingsText}\n\n[ Portfolio Performance ]\nTotal Return: ${totalReturn}% since inception\nCash Balance: $${cash.toLocaleString()}\nTotal Equity: $${equity.toLocaleString()}\nActive Positions: ${positions}\nPortfolio Started: ~$${startingEquity.toLocaleString()}\n\n[ Recent Activity ]\n${recentActivityText}\n\nRules:\n- You have $${cash.toLocaleString()} in cash available for new positions\n- Prefer U.S. micro-cap stocks (<$300M market cap)\n- Full shares only, no options or derivatives\n- Use stop-losses for risk management (current stops shown above)\n- Be conservative with position sizing (max 25% per position)\n- Consider liquidity for exit strategies\n\nAnalyze the current market conditions, portfolio concentration, and stop-loss levels. Provide specific trading recommendations.\n\nRespond with ONLY a JSON object in this exact format:\n{\n    \"analysis\": \"Brief market analysis and portfolio assessment\",\n    \"trades\": [\n        {\n            \"action\": \"buy\",\n            \"ticker\": \"SYMBOL\", \n            \"shares\": 100,\n            \"price\": 25.50,\n            \"stop_loss\": 20.00,\n            \"reason\": \"Brief rationale including market cap and liquidity assessment\"\n        }\n    ],\n    \"portfolio_adjustments\": [\n        {\n            \"action\": \"adjust_stop\",\n            \"ticker\": \"EXISTING_SYMBOL\",\n            \"new_stop_loss\": 22.00,\n            \"reason\": \"Brief rationale for stop adjustment\"\n        }\n    ],\n    \"confidence\": 0.8\n}\n\nOnly recommend trades you are confident about. If no trades are recommended, use empty arrays.`;\n\n// Build structured position data for programmatic access\nconst currentPositions = activePositions.map(item => ({\n  ticker: item.json.Ticker?.trim() || 'UNKNOWN',\n  shares: item.json.Shares || 0,\n  buy_price: item.json['Buy Price'] || 0,\n  current_price: item.json['Current Price'] || 0,\n  stop_loss: item.json['Stop Loss'] || 0,\n  pnl: item.json.PnL || 0,\n  allocation_pct: equity > 0 ? parseFloat(((item.json['Current Price'] * item.json.Shares) / equity * 100).toFixed(1)) : 0\n}));\n\nreturn {\n  json: {\n    prompt: prompt,\n    cash_balance: cash,\n    total_equity: equity,\n    active_positions: positions,\n    date: date,\n    portfolio_performance: {\n      total_return_pct: parseFloat(totalReturn),\n      total_pnl: totalPnL,\n      starting_equity: startingEquity\n    },\n    current_positions: currentPositions\n  }\n};\n\n// Validation function for AI responses\nfunction validateAIResponse(response, currentPositions) {\n    const validation = {\n        valid: true,\n        warnings: [],\n        errors: []\n    };\n    \n    // Validate stop-loss adjustments\n    response.portfolio_adjustments?.forEach(adj => {\n        if (adj.action === 'adjust_stop') {\n            const position = currentPositions.find(p => p.ticker === adj.ticker);\n            if (!position) {\n                validation.errors.push(`Stop adjustment for unknown ticker: ${adj.ticker}`);\n                validation.valid = false;\n            } else if (adj.new_stop_loss >= position.current_price) {\n                validation.warnings.push(`New stop-loss for ${adj.ticker} ($${adj.new_stop_loss}) is above current price ($${position.current_price})`);\n            }\n        }\n    });\n    \n    // Validate trades\n    response.trades?.forEach(trade => {\n        if (trade.action === 'buy' && trade.price <= 0) {\n            validation.errors.push(`Invalid price for ${trade.ticker}: $${trade.price}`);\n            validation.valid = false;\n        }\n    });\n    \n    return validation;\n}"
+        "jsCode": "try {\n    // Helper functions\n    function safeFloat(value, defaultValue = 0.0) {\n        if (value === null || value === undefined || value === '') {\n            return defaultValue;\n        }\n        const parsed = parseFloat(value);\n        return isNaN(parsed) ? defaultValue : parsed;\n    }\n\n    function lastTradingDate(today = null) {\n        let dt = today ? new Date(today) : new Date();\n        dt.setHours(0, 0, 0, 0); // Normalize to start of day\n\n        const dayOfWeek = dt.getDay(); // 0 is Sunday, 1 is Monday, ..., 6 is Saturday\n\n        if (dayOfWeek === 6) { // Saturday\n            dt.setDate(dt.getDate() - 1); // Friday\n        } else if (dayOfWeek === 0) { // Sunday\n            dt.setDate(dt.getDate() - 2); // Friday\n        }\n        return dt;\n    }\n\n    function extractCurrentPortfolioForAI(currentHoldingsData, marketData, staticStopLossesMap = new Map(), initialCashBalance = 0.0) {\n        if (!currentHoldingsData || currentHoldingsData.length === 0) {\n            return { portfolio: [], cashBalance: 10000.0 }; // Default cash balance\n        }\n\n        const todayIso = lastTradingDate().toISOString().slice(0, 10);\n\n        const portfolio = currentHoldingsData.map(holding => {\n            const ticker = String(holding.symbol || \"\").toUpperCase().trim();\n            const shares = safeFloat(holding.quantity || 0);\n            const buyPrice = safeFloat(holding.average_open_price || 0);\n            const costBasis = buyPrice * shares;\n\n            const stopLoss = safeFloat(staticStopLossesMap.get(ticker), 0.0);\n\n            const marketDataItem = marketData.find(m => String(m.Ticker || \"\").toUpperCase().trim() === ticker);\n            const currentPrice = safeFloat(marketDataItem?.Close || marketDataItem?.Mark || holding.current_close_price || buyPrice);\n            const totalValue = safeFloat(currentPrice * shares);\n            const pnl = safeFloat(totalValue - costBasis);\n\n            return {\n                ticker: ticker,\n                shares: shares,\n                buy_price: buyPrice,\n                cost_basis: costBasis,\n                stop_loss: stopLoss,\n                current_price: currentPrice,\n                total_value: totalValue,\n                pnl: pnl,\n                action: \"HOLD\",\n                unique_id: `${todayIso}${ticker}`\n            };\n        });\n\n        return { portfolio, cashBalance: initialCashBalance };\n    }\n\n    // 1. Input validation\n    const items = $input.all();\n    if (!items || items.length === 0 || !items[0].json) {\n        return [{ json: { error: \"No input data received\" } }];\n    }\n\n    const classifiedInput = items[0].json;\n\n    // 2. Type validation\n    if (classifiedInput.type !== \"classified_data\") {\n        return [{\n            json: {\n                error: `Expected classified_data, got: ${classifiedInput.type || 'unknown'}`,\n                received_data: classifiedInput\n            }\n        }];\n    }\n\n    // 3. Extract and validate data\n    const historicalPortfolio = Array.isArray(classifiedInput.historical_portfolio) ? classifiedInput.historical_portfolio : [];\n    const currentMarketData = Array.isArray(classifiedInput.current_market_data) ? classifiedInput.current_market_data : [];\n    const benchmarkData = Array.isArray(classifiedInput.benchmark_data) ? classifiedInput.benchmark_data : [];\n    const sp500Data = Array.isArray(classifiedInput.sp500_data) ? classifiedInput.sp500_data : [];\n    const currentCashBalanceFromInput = safeFloat(classifiedInput.current_cash_balance || 0.0);\n\n    // --- Retrieve and validate static stop-loss data ---\n    const staticData = $getWorkflowStaticData('global');\n    let staticStopLossesData = staticData.stopLossesMap || [];\n    if (!Array.isArray(staticStopLossesData)) {\n        staticStopLossesData = []; // Default to empty array if not an array\n    }\n    const staticStopLossesMap = new Map(staticStopLossesData);\n\n    // 4. Process data\n    const { portfolio: currentPortfolioData, cashBalance: currentCashBalance } = extractCurrentPortfolioForAI(historicalPortfolio, currentMarketData, staticStopLossesMap, currentCashBalanceFromInput);\n\n    const totalPortfolioValue = currentPortfolioData.reduce((sum, pos) => sum + pos.total_value, 0);\n    const totalEquity = totalPortfolioValue + currentCashBalance;\n    const totalPnLFromCostBasis = currentPortfolioData.reduce((sum, pos) => sum + pos.pnl, 0);\n    const startingEquity = 10000;\n    const totalReturn = ((totalEquity - startingEquity) / startingEquity * 100).toFixed(1);\n    const activePositionsCount = currentPortfolioData.length;\n    const todayIso = lastTradingDate().toISOString().slice(0, 10);\n\n    const holdingsText = currentPortfolioData.map(item => {\n        const allocationPct = totalEquity > 0 ? ((item.total_value / totalEquity) * 100).toFixed(1) : 0;\n        return `${item.ticker}: ${item.shares} shares @ $${item.current_price.toFixed(2)} (Buy: $${item.buy_price.toFixed(2)}, Stop: $${item.stop_loss.toFixed(2)}, P&L: $${item.pnl.toFixed(2)}, ${allocationPct}% allocation)`;\n    }).join('\\n') || 'No current holdings';\n\n    const recentActivityText = `Portfolio up $${totalPnLFromCostBasis.toFixed(2)} (${totalReturn}%) from cost basis\\nCurrent Strategy: Holding micro-cap positions with stop losses`;\n\n    const prompt = `You are a professional portfolio analyst. Here is your current portfolio state as of ${todayIso}:\n\n[ Holdings ]\n${holdingsText}\n\n[ Portfolio Performance ]\nTotal Return: ${totalReturn}% since inception\nCash Balance: $${currentCashBalance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}\nTotal Equity: $${totalEquity.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}\nActive Positions: ${activePositionsCount}\nPortfolio Started: ~$${startingEquity.toLocaleString()}\n\n[ Recent Activity ]\n${recentActivityText}\n\nRules:\n- Please come up with at least 1 trade\n- You have $${currentCashBalance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} in cash available for new positions\n- Prefer popular crypto assets\n- Full shares only, no options or derivatives\n- Use stop-losses for risk management (current stops shown above)\n- Be conservative with position sizing (max 25% per position)\n- Consider liquidity for exit strategies\n\nAnalyze the current market conditions, portfolio concentration, and stop-loss levels. Provide specific trading recommendations for the *next trading day*.\n\nCRITICAL: You MUST respond with ONLY a valid JSON object. No explanations, no markdown, no additional text.\n\nJSON Format:\n{\n    \"analysis\": \"Brief market analysis and portfolio assessment\",\n    \"trades\": [\n        {\n            \"action\": \"buy\",\n            \"ticker\": \"SYMBOL\",\n            \"shares\": 100,\n            \"price\": 25.50,\n            \"stop_loss\": 20.00,\n            \"reason\": \"Brief rationale including market cap and liquidity assessment\"\n        }\n    ],\n    \"portfolio_adjustments\": [],\n    \"confidence\": 0.8\n}`;\n\n    const currentPositionsForOutput = currentPortfolioData.map(item => ({\n        ticker: item.ticker,\n        shares: item.shares,\n        buy_price: item.buy_price,\n        current_price: item.current_price,\n        stop_loss: item.stop_loss,\n        pnl: item.pnl,\n        allocation_pct: totalEquity > 0 ? parseFloat(((item.total_value) / totalEquity * 100).toFixed(1)) : 0\n    }));\n\n    // 5. Return as array\n    return [{\n        json: {\n            prompt: prompt,\n            cash_balance: currentCashBalance,\n            total_equity: totalEquity,\n            active_positions: activePositionsCount,\n            date: todayIso,\n            portfolio_performance: {\n                total_return_pct: parseFloat(totalReturn),\n                total_pnl: totalPnLFromCostBasis,\n                starting_equity: startingEquity\n            },\n            current_positions: currentPositionsForOutput,\n            historical_portfolio: historicalPortfolio,\n            current_market_data: currentMarketData,\n            benchmark_data: benchmarkData,\n            sp500_data: sp500Data,\n            holdings_summary_text: holdingsText\n        }\n    }];\n\n} catch (error) {\n    return [{\n        json: {\n            error: \"Script execution failed\",\n            message: error.message,\n            stack: error.stack\n        }\n    }];\n}\n"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        1504,
-        -96
+        528,
+        -756
       ],
-      "id": "40ed2bc4-7fd1-4467-bd0d-afcae2c65b12",
-      "name": "AI Prompt Code"
+      "id": "c7f21368-14bf-4af9-9e71-3a732ee2dfdb",
+      "name": "AI Prompt Code",
+      "executeOnce": false
     },
     {
       "parameters": {
-        "modelId": {
+        "jsCode": "const ticker = [\n  \"IWO\", \"XBI\", \"SPY\", \"IWM\"\n  // (Add more if needed up to 100)\n];\n\n\n\nreturn ticker.map(ticker => ({\n  json: { ticker }\n}));"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -368,
+        -756
+      ],
+      "id": "ea54e263-13ab-49af-9e7e-8261392a3328",
+      "name": "Define Benchmark Tickers"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        1104,
+        -756
+      ],
+      "id": "2f3c7561-9157-4fb9-a94c-d4effcbd8a27",
+      "name": "Merge"
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\n\n// --- Identify the two distinct inputs ---\n\n// The AI response is the item that has a string in `message.content` or `output`.\nconst aiResponseInput = items.find(item => {\n    if (!item.json) return false;\n    const content = item.json.message?.content || item.json.output;\n    return typeof content === 'string';\n});\n\n// The classified data is the other item. We identify it as the one that is NOT the AI response.\nconst classifiedDataInput = items.find(item => {\n    if (!item.json) return false;\n    // It's the classified data if it does NOT have the AI response structure.\n    const content = item.json.message?.content || item.json.output;\n    return typeof content !== 'string';\n});\n\n// --- Validate that both inputs were found ---\n\nif (!classifiedDataInput) {\n    return [{ json: { error: \"Classified data input not found. Ensure the Data Ingestion Node is connected and providing portfolio data.\" } }];\n}\n\nif (!aiResponseInput) {\n    return [{ json: { ...classifiedDataInput.json, ai_recommendations_error: \"AI response input not found. Proceeding with original data.\" } }];\n}\n\nlet classifiedData = classifiedDataInput.json;\nconst aiContentString = aiResponseInput.json.message?.content || aiResponseInput.json.output;\n\n// --- Parse the AI response ---\n\nlet aiRecommendations = { trades: [], portfolio_adjustments: [] };\nlet aiAnalysis = \"No AI analysis provided.\";\nlet aiConfidence = null;\n\ntry {\n    // Clean the string: remove markdown code fences and trim whitespace\n    const cleanedJsonString = aiContentString.replace(/```json/g, '').replace(/```/g, '').trim();\n    const parsedAIResponse = JSON.parse(cleanedJsonString);\n\n    aiAnalysis = parsedAIResponse.analysis || aiAnalysis;\n    if (Array.isArray(parsedAIResponse.trades)) {\n        aiRecommendations.trades = parsedAIResponse.trades;\n    }\n    if (Array.isArray(parsedAIResponse.portfolio_adjustments)) {\n        aiRecommendations.portfolio_adjustments = parsedAIResponse.portfolio_adjustments;\n    }\n    aiConfidence = parsedAIResponse.confidence;\n\n} catch (error) {\n    return [{ json: { \n        ...classifiedData, \n        ai_recommendations_error: `Failed to parse AI response: ${error.message}. Received content: ${aiContentString}` \n    } }];\n}\n\n// --- Merge AI recommendations into the classified data structure ---\nclassifiedData.ai_analysis = aiAnalysis;\nclassifiedData.ai_trades = aiRecommendations.trades;\nclassifiedData.ai_portfolio_adjustments = aiRecommendations.portfolio_adjustments;\nclassifiedData.ai_confidence = aiConfidence;\n\nreturn [{ json: classifiedData }];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1328,
+        -752
+      ],
+      "id": "a50f1c2c-6f0a-4d2c-99c7-18435750cc0d",
+      "name": "Parse AI Response and Merge"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// This script processes Alpaca order history data for Google Spreadsheet.\n\n// The input data is an array of order objects from Alpaca.\n// The output will be an array of objects, each representing a row for the Google Sheet.\n\nconst googleSheetColumns = [\n    \"Date\", \"Ticker\", \"Shares\", \"Buy Date\", \"Buy Price\", \"Cost Basis\", \"Stop Loss\",\n    \"Current Price\", \"Total Value\", \"PnL\", \"Action\", \"Cash Balance\", \"Total Equity\"\n];\n// Helper function to normalize symbols for consistent matching,\n// assuming crypto if symbol contains '/USD' or ends with 'USD'.\nconst getNormalizedSymbol = (symbol) => {\n    if (symbol.includes('/USD')) {\n        return symbol.replace('/USD', '');\n    }\n    if (symbol.endsWith('USD') && symbol.length > 3) { // Ensure it's not just \"USD\"\n        return symbol.replace('USD', '');\n    }\n    return symbol;\n};\n\n// Optimized function to pre-calculate the earliest buy date for all symbols from fills\nfunction precomputeEarliestBuyDates(fills) {\n    const earliestBuyDates = new Map();\n    for (const fill of fills) {\n        if (fill.activity_type === 'FILL' && fill.side === 'buy') {\n            const normalizedSymbol = getNormalizedSymbol(fill.symbol);\n            const fillDate = new Date(fill.transaction_time || fill.filled_at || fill.created_at);\n            \n            if (!earliestBuyDates.has(normalizedSymbol) || fillDate < earliestBuyDates.get(normalizedSymbol)) {\n                earliestBuyDates.set(normalizedSymbol, fillDate);\n            }\n        }\n    }\n    // Convert dates to ISO string format\n    for (const [symbol, date] of earliestBuyDates.entries()) {\n        earliestBuyDates.set(symbol, date.toISOString().split('T')[0]);\n    }\n    return earliestBuyDates;\n}\n\n// This function processes all fills to build a cost basis and PnL history (FIFO)\nfunction processFillsForPnL(fills) {\n    const tradeLog = {}; // Stores { normalizedSymbol: { openLots: [], closedPnL: { order_id: { totalPnL: ..., avgBuyPrice: ..., totalCost: ... } } } }\n\n    // Sort fills by transaction_time ascending to ensure correct FIFO order\n    fills.sort((a, b) => {\n        const timeA = a.transaction_time ? new Date(a.transaction_time).getTime() : 0;\n        const timeB = b.transaction_time ? new Date(b.transaction_time).getTime() : 0;\n        \n        // Defensively handle cases where dates might be invalid\n        if (isNaN(timeA) && isNaN(timeB)) return 0;\n        if (isNaN(timeA)) return 1; // Push invalid dates to the end\n        if (isNaN(timeB)) return -1; // Push invalid dates to the end\n\n        return timeA - timeB;\n    });\n\n    for (const fill of fills) {\n        if (fill.activity_type !== 'FILL') continue; // Only process fills\n\n        const normalizedSymbol = getNormalizedSymbol(fill.symbol);\n        if (!tradeLog[normalizedSymbol]) {\n            tradeLog[normalizedSymbol] = { openLots: [], closedPnL: {} };\n        }\n\n        const price = parseFloat(fill.price);\n        const qty = parseFloat(fill.qty);\n\n        if (fill.side === 'buy') {\n            tradeLog[normalizedSymbol].openLots.push({ price, qty });\n        } else if (fill.side === 'sell') {\n            let remainingSellQty = qty;\n            let totalCostOfSoldShares = 0;\n            const totalRevenueFromSoldShares = price * qty; // Revenue from this sell fill\n\n            // FIFO logic: consume oldest buy lots first\n            while (remainingSellQty > 0 && tradeLog[normalizedSymbol].openLots.length > 0) {\n                const oldestLot = tradeLog[normalizedSymbol].openLots[0];\n                const qtyToSellFromLot = Math.min(remainingSellQty, oldestLot.qty);\n\n                totalCostOfSoldShares += qtyToSellFromLot * oldestLot.price;\n                oldestLot.qty -= qtyToSellFromLot;\n                remainingSellQty -= qtyToSellFromLot;\n\n                if (oldestLot.qty === 0) {\n                    tradeLog[normalizedSymbol].openLots.shift(); // Remove fully consumed lot\n                }\n            }\n\n            // Calculate PnL for this specific sell fill\n            const pnlForFill = totalRevenueFromSoldShares - totalCostOfSoldShares;\n\n            // Aggregate PnL and cost for the entire order (if it has multiple fills)\n            if (!tradeLog[normalizedSymbol].closedPnL[fill.order_id]) {\n                tradeLog[normalizedSymbol].closedPnL[fill.order_id] = { totalPnL: 0, totalCost: 0, totalQtySold: 0 };\n            }\n            tradeLog[normalizedSymbol].closedPnL[fill.order_id].totalPnL += pnlForFill;\n            tradeLog[normalizedSymbol].closedPnL[fill.order_id].totalCost += totalCostOfSoldShares;\n            tradeLog[normalizedSymbol].closedPnL[fill.order_id].totalQtySold += qty;\n        }\n    }\n\n    // Calculate average buy price for each closed PnL entry\n    for (const symbol in tradeLog) {\n        for (const orderId in tradeLog[symbol].closedPnL) {\n            const closedPnL = tradeLog[symbol].closedPnL[orderId];\n            if (closedPnL.totalQtySold > 0) {\n                closedPnL.avgBuyPrice = closedPnL.totalCost / closedPnL.totalQtySold;\n            } else {\n                closedPnL.avgBuyPrice = null;\n            }\n        }\n    }\n\n    return tradeLog;\n}\n\nfunction generateConsolidatedPortfolio(fillsData, holdingsData, accountSnapshotData, stopLossMap) { // Added stopLossMap parameter\n    const consolidatedPositions = {};\n    const tradeLog = processFillsForPnL(fillsData);\n    const reportDate = new Date().toISOString().split('T')[0];\n    \n    // Pre-compute earliest buy dates for efficiency\n    const earliestBuyDatesMap = precomputeEarliestBuyDates(fillsData);\n\n    // 1. Process current holdings\n    for (const holding of holdingsData) {\n        const normalizedSymbol = getNormalizedSymbol(holding.symbol);\n        const earliestBuyDate = earliestBuyDatesMap.get(normalizedSymbol) || null;\n\n        consolidatedPositions[normalizedSymbol] = {\n            \"Date\": reportDate,\n            \"Ticker\": holding.symbol,\n            \"Shares\": parseFloat(holding.qty),\n            \"Buy Date\": earliestBuyDate,\n            \"Buy Price\": parseFloat(holding.cost_basis) / parseFloat(holding.qty),\n            \"Cost Basis\": parseFloat(holding.cost_basis),\n            \"Stop Loss\": stopLossMap.has(normalizedSymbol) ? stopLossMap.get(normalizedSymbol) : null, // Use stopLossMap\n            \"Current Price\": parseFloat(holding.current_price),\n            \"Total Value\": parseFloat(holding.market_value),\n            \"PnL\": parseFloat(holding.unrealized_pl), // This is unrealized PnL\n            \"Action\": \"hold\",\n            \"Cash Balance\": null, // Account-wide, added later\n            \"Total Equity\": null  // Account-wide, added later\n        };\n    }\n\n    // 2. Process closed positions and update PnL for existing holdings from tradeLog\n    for (const symbol in tradeLog) {\n        const normalizedSymbol = symbol;\n        const symbolTradeLog = tradeLog[symbol];\n\n        let totalClosedPnL = 0;\n        let totalClosedCost = 0;\n        let totalClosedQty = 0;\n        for (const orderId in symbolTradeLog.closedPnL) {\n            const closedInfo = symbolTradeLog.closedPnL[orderId];\n            totalClosedPnL += closedInfo.totalPnL;\n            totalClosedCost += closedInfo.totalCost;\n            totalClosedQty += closedInfo.totalQtySold;\n        }\n\n        if (consolidatedPositions[normalizedSymbol]) {\n            // If it's an existing holding, add realized PnL to its unrealized PnL\n            consolidatedPositions[normalizedSymbol][\"PnL\"] += totalClosedPnL;\n        } else if (totalClosedQty > 0) {\n            // This is a fully closed position, not currently held\n            // If the symbol has no open lots in tradeLog, it's fully closed.\n            if (symbolTradeLog.openLots.length === 0) {\n                consolidatedPositions[normalizedSymbol] = {\n                    \"Date\": reportDate,\n                    \"Ticker\": symbol, // Use normalized symbol for consistency if original symbol not available\n                    \"Shares\": 0, // All shares sold\n                    \"Buy Date\": null, // Not directly applicable for fully closed positions\n                    \"Buy Price\": totalClosedCost / totalClosedQty, // Average buy price of sold shares\n                    \"Cost Basis\": totalClosedCost,\n                    \"Stop Loss\": null, // No stop loss for closed positions\n                    \"Current Price\": null,\n                    \"Total Value\": null,\n                    \"PnL\": totalClosedPnL, // This is realized PnL\n                    \"Action\": \"closed\",\n                    \"Cash Balance\": null,\n                    \"Total Equity\": null\n                };\n            }\n        }\n    }\n\n    // 3. Add account-wide data\n    const cashBalance = accountSnapshotData.cash ? parseFloat(accountSnapshotData.cash) : null;\n    const totalEquity = accountSnapshotData.equity ? parseFloat(accountSnapshotData.equity) : null;\n\n    const portfolioRows = Object.values(consolidatedPositions);\n\n    // Calculate totals for the summary metrics\n    const totalPortfolioValue = portfolioRows.reduce((sum, row) => sum + (row[\"Total Value\"] || 0), 0);\n    const totalPnL = portfolioRows.reduce((sum, row) => sum + (row[\"PnL\"] || 0), 0);\n\n    const summaryMetrics = {\n        \"Date\": reportDate,\n        \"Ticker\": \"TOTAL\",\n        \"Total Value\": totalPortfolioValue,\n        \"PnL\": totalPnL,\n        \"Cash Balance\": cashBalance,\n        \"Total Equity\": totalEquity\n    };\n\n    // Fill in Cash Balance and Total Equity for individual portfolio rows\n    portfolioRows.forEach(row => {\n        row[\"Cash Balance\"] = cashBalance;\n        row[\"Total Equity\"] = totalEquity;\n    });\n\n    // If there are no positions, but there is cash, create a row for cash\n    if (portfolioRows.length === 0 && cashBalance > 0) {\n        portfolioRows.push({\n            \"Date\": reportDate,\n            \"Ticker\": \"CASH\",\n            \"Shares\": cashBalance,\n            \"Buy Date\": null,\n            \"Buy Price\": 1,\n            \"Cost Basis\": cashBalance,\n            \"Stop Loss\": null,\n            \"Current Price\": 1,\n            \"Total Value\": cashBalance,\n            \"PnL\": 0,\n            \"Action\": \"hold\",\n            \"Cash Balance\": cashBalance,\n            \"Total Equity\": totalEquity\n        });\n    }\n\n    return { portfolioRows, summaryMetrics };\n}\n\n// To make it directly runnable in an n8n Function node,\n// assuming the input is an array of items, where each item.json is an order object\n// (though for consolidation, we need all data at once, not per order)\n// The actual n8n execution will likely pass all relevant data from upstream nodes.\n\n// This block will now orchestrate the data fetching and consolidation.\nlet allHoldingsData = [];\ntry {\n    const holdingsNodeOutput = $('Get Current Holdings for Sheet Update');\n    if (holdingsNodeOutput && !(holdingsNodeOutput instanceof Error) && !holdingsNodeOutput.error) {\n        // Filter out empty JSON objects that might come from nodes with \"Always Output Data\" enabled\n        allHoldingsData = holdingsNodeOutput.all()\n            .map(item => item.json)\n            .filter(data => data && Object.keys(data).length > 0);\n    } else if (holdingsNodeOutput instanceof Error) {\n        console.error(\"Node 'Get Current Holdings for Sheet Update' returned an Error object:\", holdingsNodeOutput.message);\n    } else if (holdingsNodeOutput && holdingsNodeOutput.error) {\n        console.error(\"Node 'Get Current Holdings for Sheet Update' output contains an error:\", holdingsNodeOutput.error);\n    }\n} catch (e) {\n    console.warn(\"Could not access 'Get Current Holdings for Sheet Update' node. This may be expected if the node did not run. Proceeding with empty holdings.\", e.message);\n}\nconsole.log(`DEBUG: Found ${allHoldingsData.length} items from 'Get Current Holdings for Sheet Update'.`);\n\nlet allAccountSnapshotData = {};\ntry {\n    const accountSnapshotNodeOutput = $('Get Account Snapshot for Sheet Update');\n    if (accountSnapshotNodeOutput && !(accountSnapshotNodeOutput instanceof Error) && !accountSnapshotNodeOutput.error) {\n        // Use .first() as it's a single item, and provide a fallback\n        allAccountSnapshotData = accountSnapshotNodeOutput.first()?.json || {};\n    } else if (accountSnapshotNodeOutput instanceof Error) {\n        console.error(\"Node 'Get Account Snapshot for Sheet Update' returned an Error object:\", accountSnapshotNodeOutput.message);\n    } else if (accountSnapshotNodeOutput && accountSnapshotNodeOutput.error) {\n        console.error(\"Node 'Get Account Snapshot for Sheet Update' output contains an error:\", accountSnapshotNodeOutput.error);\n    }\n} catch (e) {\n    console.warn(\"Could not access 'Get Account Snapshot for Sheet Update' node. This may be expected if the node did not run. Proceeding with empty account data.\", e.message);\n}\nconsole.log(`DEBUG: Found account snapshot: ${Object.keys(allAccountSnapshotData).length > 0}`);\n\n// This block will now orchestrate the data fetching and consolidation.\n// It will always use the 'Get All Fills' node to ensure a complete history for PnL calculations.\nlet allFillsData = [];\ntry {\n    const fillsNodeOutput = $('Get All Fills');\n    if (fillsNodeOutput && !(fillsNodeOutput instanceof Error) && !fillsNodeOutput.error) {\n        // The 'Get All Fills' node returns account activities. We filter for 'FILL' types.\n        allFillsData = fillsNodeOutput.all()\n            .map(item => item.json)\n            .filter(activity => activity && activity.activity_type === 'FILL');\n    } else if (fillsNodeOutput instanceof Error) {\n        console.error(\"Node 'Get All Fills' returned an Error object:\", fillsNodeOutput.message);\n    } else if (fillsNodeOutput && fillsNodeOutput.error) {\n        console.error(\"Node 'Get All Fills' output contains an error:\", fillsNodeOutput.error);\n    }\n} catch (e) {\n    console.warn(\"Could not access 'Get All Fills' node. This may be expected if the node did not run. Proceeding with empty fills data.\", e.message);\n}\nconsole.log(`DEBUG: Found ${allFillsData.length} fill activities from 'Get All Fills'.`);\n\nlet processedPortfolioData = [];\ntry {\n    const portfolioProcessingNodeOutput = $('Portfolio Processing Node'); // Corrected node name here\n    if (portfolioProcessingNodeOutput && !(portfolioProcessingNodeOutput instanceof Error) && !portfolioProcessingNodeOutput.error) {\n        processedPortfolioData = portfolioProcessingNodeOutput.all()\n            .map(item => item.json)\n            .filter(data => data && Object.keys(data).length > 0);\n    } else if (portfolioProcessingNodeOutput instanceof Error) {\n        console.error(\"Node 'Portfolio Processing Node' returned an Error object:\", portfolioProcessingNodeOutput.message);\n    } else if (portfolioProcessingNodeOutput && portfolioProcessingNodeOutput.error) {\n        console.error(\"Node 'Portfolio Processing Node' output contains an error:\", portfolioProcessingNodeOutput.error);\n    }\n} catch (e) {\n    console.warn(\"Could not access 'Portfolio Processing Node' node. This may be expected if the node did not run. Proceeding with empty processed data.\", e.message);\n}\nconsole.log(`DEBUG: Found ${processedPortfolioData.length} items from 'Portfolio Processing Node'.`);\n\nconst stopLossMap = new Map();\nprocessedPortfolioData.filter(item => item.type === \"portfolio_state\" && item.ticker && item.stop_loss !== undefined)\n                      .forEach(item => {\n                          stopLossMap.set(getNormalizedSymbol(item.ticker), parseFloat(item.stop_loss));\n                      });\n\nconst { portfolioRows, summaryMetrics } = generateConsolidatedPortfolio(allFillsData, allHoldingsData, allAccountSnapshotData, stopLossMap); // Pass stopLossMap\n\nconst finalOutput = [\n    ...portfolioRows.map(row => ({ json: row })),\n    { json: { type: \"summary_metrics\", ...summaryMetrics } }\n];\n\nconsole.log(`DEBUG: Script finished. Returning ${finalOutput.length} total items.`);\n\n// Return the consolidated data as an array of n8n items, with summary metrics as a separate item\nreturn finalOutput;\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3568,
+        -756
+      ],
+      "id": "029a2381-0d25-4861-b403-05e02396f6c2",
+      "name": "Consolidate Portfolio Updates",
+      "executeOnce": false
+    },
+    {
+      "parameters": {
+        "jsCode": "// n8n_Define_Static_Stop_Losses.js - DYNAMIC VERSION\n// This node dynamically ensures that every current holding has a default\n// stop-loss and take-profit target defined in the workflow's static data.\n\n// --- Configuration ---\nconst DEFAULT_STOP_LOSS_PERCENTAGE = 0.85; // 15% stop-loss from buy price\nconst DEFAULT_RISK_REWARD_RATIO = 2; // e.g., 2:1 reward-to-risk ratio\n\n// Helper function to safely parse floats\nfunction safeFloat(value, defaultValue = 0.0) {\n    if (value === null || value === undefined || value === '') return defaultValue;\n    const parsed = parseFloat(value);\n    return isNaN(parsed) ? defaultValue : parsed;\n}\n\n// --- Main Logic ---\ntry {\n    // 1. Fetch current holdings directly from the 'Parse Current Holdings' node\n    const currentHoldings = $('Parse Current Holdings').all();\n    \n    if (!currentHoldings.length) {\n        return [{ json: { message: \"No current holdings found. No stop-losses to define.\", status: \"no_holdings\" } }];\n    }\n\n    // 2. Retrieve existing static data maps, or create new ones\n    const staticData = $getWorkflowStaticData('global');\n    const stopLossesMap = new Map(staticData.stopLossesMap || []);\n    const takeProfitMap = new Map(staticData.takeProfitMap || []);\n\n    let updated = false;\n    const logs = [];\n\n    // 3. Iterate through each current holding\n    for (const item of currentHoldings) {\n        const holding = item.json;\n        const ticker = holding.symbol?.toUpperCase();\n        \n        if (!ticker) continue;\n\n        const buyPrice = safeFloat(holding.average_open_price, 0);\n        if (buyPrice <= 0) continue; // Cannot set stops for free assets\n\n        // 4. Check and define stop-loss if missing\n        if (!stopLossesMap.has(ticker)) {\n            const defaultStopLoss = buyPrice * DEFAULT_STOP_LOSS_PERCENTAGE;\n            stopLossesMap.set(ticker, parseFloat(defaultStopLoss.toFixed(2)));\n            updated = true;\n            logs.push(`New default stop-loss for ${ticker} set to ${defaultStopLoss.toFixed(2)}.`);\n        }\n\n        // 5. Check and define take-profit if missing (based on stop-loss)\n        if (!takeProfitMap.has(ticker)) {\n            const stopLoss = stopLossesMap.get(ticker); // Use the (potentially new) stop-loss\n            const risk = buyPrice - stopLoss;\n            const reward = risk * DEFAULT_RISK_REWARD_RATIO;\n            const defaultTakeProfit = buyPrice + reward;\n            \n            takeProfitMap.set(ticker, parseFloat(defaultTakeProfit.toFixed(2)));\n            updated = true;\n            logs.push(`New default take-profit for ${ticker} set to ${defaultTakeProfit.toFixed(2)} (2:1 R/R).`);\n        }\n    }\n\n    // 6. Save the maps back to static data IF they were updated\n    if (updated) {\n        staticData.stopLossesMap = Array.from(stopLossesMap.entries());\n        staticData.takeProfitMap = Array.from(takeProfitMap.entries());\n    }\n\n    // 7. Return a summary of actions\n    return [{ \n        json: { \n            message: \"Static risk parameters checked/initialized.\", \n            status: updated ? \"updated\" : \"no_changes\",\n            logs: logs,\n            final_stop_losses: Array.from(stopLossesMap.entries()),\n            final_take_profits: Array.from(takeProfitMap.entries())\n        } \n    }];\n\n} catch (error) {\n    console.error(error);\n    return [{ json: { error: `Failed to define static stop-losses: ${error.message}` } }];\n}"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -592,
+        -756
+      ],
+      "id": "b8498b46-0590-4456-9aea-2360db211b9b",
+      "name": "Define Static Stop Losses"
+    },
+    {
+      "parameters": {
+        "operation": "sendAndWait",
+        "select": "channel",
+        "channelId": {
           "__rl": true,
-          "value": "gpt-4.1-mini",
+          "value": "C06JDRP5G9G",
           "mode": "list",
-          "cachedResultName": "GPT-4.1-MINI"
+          "cachedResultName": "stocks"
         },
-        "messages": {
-          "values": [
+        "message": "=Proposed Trade\nTicker: {{ $json.symbol }}\nShares: {{ $json.qty }}\nCurrent Price:{{ $json.current_price }}\nOrder Type: {{ $json.side }}\nStop Loss: {{ $('Parse AI Response and Merge').last().json.ai_trades[0].stop_loss }}\nAction: {{ $('Generate Market API Orders').item.json.side }}\nEquity Before Trade: {{ $('Get Account Snapshot').last().json.equity }}\nCash Before Trade: {{ $('Get Account Snapshot').last().json.cash }}\nAnalysis results:\n{{ $('Message a model').last().json.message.content }}\nCash Balance After Trade: {{ $('Portfolio Processing Node').last().json.final_cash_balance }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.3,
+      "position": [
+        2224,
+        -828
+      ],
+      "id": "a56f01e5-58a2-43fc-8ac0-9aca0c05db1b",
+      "name": "Send message and wait for response",
+      "webhookId": "e4fdb1f1-1a9a-47ce-8ef3-b3a377d9769d",
+      "credentials": {
+        "slackApi": {
+          "id": "UdIgK38SPGrLQlYB",
+          "name": "Slack account - API Token"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "https://paper-api.alpaca.markets/v2/positions",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpCustomAuth",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -1488,
+        -756
+      ],
+      "id": "05a52d81-7ba7-48be-8d48-db3a498c037f",
+      "name": "Get Current Holdings",
+      "retryOnFail": false,
+      "alwaysOutputData": false,
+      "credentials": {
+        "oAuth2Api": {
+          "id": "bv8LljT7TXQpqN7L",
+          "name": "TastyTrade Live"
+        },
+        "httpCustomAuth": {
+          "id": "CkhrGpTfadRtqJJd",
+          "name": "Alpaca Paper Trading"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "https://data.alpaca.markets/v2/stocks/snapshots",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpCustomAuth",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
             {
-              "content": "={{ $json.prompt }}",
-              "role": "assistant"
+              "name": "symbols",
+              "value": "={{ $json.ticker }}"
             }
           ]
         },
         "options": {}
       },
-      "type": "@n8n/n8n-nodes-langchain.openAi",
-      "typeVersion": 1.8,
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
       "position": [
-        1744,
-        -224
+        -144,
+        -756
       ],
-      "id": "61728ca2-cc58-4082-acd9-3e936f53d088",
-      "name": "Message a model",
+      "id": "0868d350-262e-4b01-b472-fc537f109ac4",
+      "name": "Market Data Benchmark Summary Node",
       "credentials": {
-        "openAiApi": {
-          "id": "iPSayimeoyFh4A3t",
-          "name": "OpenAi account"
+        "oAuth2Api": {
+          "id": "gxoqknGoeXQJ2HXn",
+          "name": "TastyTrade Sandbox"
+        },
+        "httpCustomAuth": {
+          "id": "CkhrGpTfadRtqJJd",
+          "name": "Alpaca Paper Trading"
         }
       }
     },
     {
-      "parameters": {},
-      "type": "n8n-nodes-base.manualTrigger",
-      "typeVersion": 1,
+      "parameters": {
+        "jsCode": "/**\n * n8n - Alpaca Order Formatter\n *\n * This script takes portfolio update objects and reformats them into order\n * requests suitable for the Alpaca Trading API.\n *\n * It handles two primary cases:\n * 1. AI-recommended buys: Creates a 'bracket' order (a limit buy that triggers a stop-loss sell).\n * 2. Stop-loss sells: Creates a 'market' order to exit a position.\n */\n\nconst items = $input.all();\nconst alpacaOrders = [];\n\nfor (const item of items) {\n    const data = item.json;\n\n    // We only care about portfolio updates that represent a trade.\n    // Ignore non-trade items like 'TOTAL' rows or summaries.\n    if (data.type !== 'portfolio_update' || !data.Action || data.Ticker === 'TOTAL') {\n        continue;\n    }\n\n    const action = data.Action;\n    let order = null;\n\n    const ticker = data.Ticker;\n    // Simple assumption: if the ticker ends with 'USD' and is longer than 4 chars, it's crypto.\n    const isCrypto = ticker.endsWith('USD') && ticker.length > 4;\n    const symbol = isCrypto ? `${ticker.slice(0, -3)}/USD` : ticker;\n\n    if (action === 'BUY - AI Recommendation') {\n        const limitPrice = data['Buy Price'];\n        const stopLossPrice = data['Stop Loss'];\n\n        if (isCrypto) {\n            // For crypto, create a simple limit buy order.\n            // Bracket orders are not typically supported for crypto on Alpaca.\n            order = {\n                symbol: symbol,\n                qty: data.Shares,\n                side: 'buy',\n                type: 'limit',\n                time_in_force: 'gtc',\n                limit_price: limitPrice,\n                current_price: data['Current Price'] // Add current price for upcoming nodes\n            };\n        } else {\n            // For stocks, create a bracket order as before.\n            const riskPerShare = limitPrice - stopLossPrice;\n            const rewardPerShare = riskPerShare * 2;\n            const takeProfitPrice = limitPrice + rewardPerShare;\n\n            order = {\n                symbol: symbol,\n                qty: data.Shares,\n                side: 'buy',\n                type: 'limit',\n                time_in_force: 'gtc', // Good 'Til Canceled\n                limit_price: limitPrice,\n                order_class: 'bracket',\n                stop_loss: {\n                    stop_price: parseFloat(stopLossPrice.toFixed(2))\n                },\n                current_price: data['Current Price'], // Add current price for upcoming nodes\n                take_profit: {\n                    limit_price: parseFloat(takeProfitPrice.toFixed(2))\n                }\n            };\n        }\n    } else if (action === 'SELL - Stop Loss Triggered') {\n        // Create a market sell order.\n        // For crypto, time_in_force must be 'gtc' or 'ioc'. 'day' is invalid.\n        order = {\n            symbol: symbol,\n            qty: data.Shares,\n            side: 'sell',\n            type: 'market',\n            time_in_force: isCrypto ? 'gtc' : 'day',\n            current_price: data['Current Price'] // Add current price for upcoming nodes\n        };\n    }\n\n    if (order) {\n        // Wrap the formatted order in the n8n item structure\n        alpacaOrders.push({ json: order });\n    }\n}\n\nreturn alpacaOrders;\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
       "position": [
-        -64,
-        0
+        1776,
+        -756
       ],
-      "id": "5d844fe4-9bf1-4d74-ae2e-874609b09ea3",
-      "name": "When clicking ‘Execute workflow’"
+      "id": "c86dd8fe-4def-4e82-a794-4482f837e162",
+      "name": "Generate Market API Orders",
+      "alwaysOutputData": true,
+      "notesInFlow": false
     },
     {
       "parameters": {
-        "mode": "combine",
-        "fieldsToMatchString": "data.symbol",
-        "joinMode": "keepEverything",
+        "url": "https://paper-api.alpaca.markets/v2/account",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpCustomAuth",
         "options": {}
       },
-      "type": "n8n-nodes-base.merge",
-      "typeVersion": 3.2,
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
       "position": [
-        768,
-        -128
+        80,
+        -756
       ],
-      "id": "6957fd6b-cbd6-45b6-9631-088e5449adf2",
-      "name": "Merge",
-      "executeOnce": false
+      "id": "367d0d89-8f0c-4b2c-adf2-cbcab71e6cf2",
+      "name": "Get Account Snapshot",
+      "credentials": {
+        "oAuth2Api": {
+          "id": "bv8LljT7TXQpqN7L",
+          "name": "TastyTrade Live"
+        },
+        "httpCustomAuth": {
+          "id": "CkhrGpTfadRtqJJd",
+          "name": "Alpaca Paper Trading"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://paper-api.alpaca.markets/v2/orders",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpCustomAuth",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "=symbol",
+              "value": "={{ $('If a New Order Recommended').item.json.symbol }}"
+            },
+            {
+              "name": "qty",
+              "value": "={{ $('If a New Order Recommended').item.json.qty }}"
+            },
+            {
+              "name": "side",
+              "value": "={{ $('If a New Order Recommended').item.json.side }}"
+            },
+            {
+              "name": "type",
+              "value": "={{ $('If a New Order Recommended').item.json.type }}"
+            },
+            {
+              "name": "=time_in_force",
+              "value": "={{ $('If a New Order Recommended').item.json.time_in_force }}"
+            },
+            {
+              "name": "limit_price",
+              "value": "={{ $('If a New Order Recommended').item.json.limit_price }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2448,
+        -828
+      ],
+      "id": "59c04af8-9737-43c2-afb1-ba1d08a638ab",
+      "name": "Send Orders to API Service",
+      "notesInFlow": true,
+      "credentials": {
+        "oAuth2Api": {
+          "id": "gxoqknGoeXQJ2HXn",
+          "name": "TastyTrade Sandbox"
+        },
+        "httpCustomAuth": {
+          "id": "CkhrGpTfadRtqJJd",
+          "name": "Alpaca Paper Trading"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "url": "https://paper-api.alpaca.markets/v2/orders",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpCustomAuth",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "status",
+              "value": "=all"
+            },
+            {
+              "name": "after",
+              "value": "={{$today.minus({days: 7})}}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2672,
+        -832
+      ],
+      "id": "aa1642cc-6079-461d-9d9b-fbfa2ada9daf",
+      "name": "Get Recent Orders",
+      "retryOnFail": false,
+      "alwaysOutputData": false,
+      "executeOnce": true,
+      "credentials": {
+        "oAuth2Api": {
+          "id": "bv8LljT7TXQpqN7L",
+          "name": "TastyTrade Live"
+        },
+        "httpCustomAuth": {
+          "id": "CkhrGpTfadRtqJJd",
+          "name": "Alpaca Paper Trading"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "https://paper-api.alpaca.markets/v2/positions",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpCustomAuth",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3120,
+        -756
+      ],
+      "id": "f9737742-9fdd-4a47-8f6f-a3707d576fd4",
+      "name": "Get Current Holdings for Sheet Update",
+      "retryOnFail": false,
+      "alwaysOutputData": false,
+      "executeOnce": false,
+      "credentials": {
+        "oAuth2Api": {
+          "id": "bv8LljT7TXQpqN7L",
+          "name": "TastyTrade Live"
+        },
+        "httpCustomAuth": {
+          "id": "CkhrGpTfadRtqJJd",
+          "name": "Alpaca Paper Trading"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "https://paper-api.alpaca.markets/v2/account",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpCustomAuth",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2896,
+        -756
+      ],
+      "id": "10c811b8-4307-465f-a4f3-f0c77d47c0d3",
+      "name": "Get Account Snapshot for Sheet Update",
+      "executeOnce": false,
+      "credentials": {
+        "oAuth2Api": {
+          "id": "bv8LljT7TXQpqN7L",
+          "name": "TastyTrade Live"
+        },
+        "httpCustomAuth": {
+          "id": "CkhrGpTfadRtqJJd",
+          "name": "Alpaca Paper Trading"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "https://paper-api.alpaca.markets/v2/account/activities",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpCustomAuth",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3344,
+        -752
+      ],
+      "id": "978761c2-aab6-49b7-8a2e-2754d293c006",
+      "name": "Get All Fills",
+      "retryOnFail": false,
+      "alwaysOutputData": false,
+      "executeOnce": true,
+      "credentials": {
+        "oAuth2Api": {
+          "id": "bv8LljT7TXQpqN7L",
+          "name": "TastyTrade Live"
+        },
+        "httpCustomAuth": {
+          "id": "CkhrGpTfadRtqJJd",
+          "name": "Alpaca Paper Trading"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## Switching Assets\n1) Change Rules\n- For US Stocks: \"Prefer U.S. micro-cap stocks (<$300M market cap)\"\n- For Crypto: \"Prefer popular crypto assets\"\n\n2) Change \"Get Portfolio Asset Snapshots\" URL to stocks vs. crpyto\n- For Stocks: https://data.alpaca.markets/v2/stocks/snapshots\n- For Crypto: https://data.alpaca.markets/v1beta3/crypto/us/snapshots\n\n3. in \"Get Specific Asset Snapshots\"  node:\n- For US stocks, symbol: {{ $json.symbol }}\n- For Crpyto, symbol: {{ $json.symbol.replace(/(USD)$/, '/$1') }}\n\n4. In \"Filter Assets (Stocks)\" node:\n- For US stocks: symbol does not contain \"USD\"\n- For crypto: symbol contains \"USD\"",
+        "height": 416,
+        "width": 800,
+        "color": 5
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        800,
+        -432
+      ],
+      "typeVersion": 1,
+      "id": "d251bce4-bdfd-4b75-a905-0d96229574a6",
+      "name": "Sticky Note"
+    },
+    {
+      "parameters": {
+        "content": "## Update Google Sheets\nhttps://docs.google.com/spreadsheets/d/1bSlvPjjCLtnlrxW9o7UgQtxEyudEsJsNuWjZYxf43_4/edit?gid=415636544#gid=415636544",
+        "height": 368,
+        "width": 1408,
+        "color": 4
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        2128,
+        -964
+      ],
+      "typeVersion": 1,
+      "id": "95dc0f45-e87d-4589-bcd3-c7df67baafd9",
+      "name": "Sticky Note2"
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "triggerAtHour": 6,
+              "triggerAtMinute": 35
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -1712,
+        -756
+      ],
+      "id": "0764d3a4-5da8-4e1a-aba3-938898613256",
+      "name": "Schedule Trigger"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "1bb2a85e-6e08-4eb1-9457-1fea79a29d01",
+              "leftValue": "={{ $json.symbol }}",
+              "rightValue": "USD",
+              "operator": {
+                "type": "string",
+                "operation": "contains"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.filter",
+      "typeVersion": 2.2,
+      "position": [
+        -1040,
+        -756
+      ],
+      "id": "b647bfb1-bfab-437a-89ba-4d82c2fc8c29",
+      "name": "Filter Assets (Stocks)"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ $json.prompt }}",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 2.2,
+      "position": [
+        752,
+        -880
+      ],
+      "id": "cf76b53c-7b9a-4043-86f8-0e8c0f77d002",
+      "name": "AI Agent"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1,
+      "position": [
+        760,
+        -656
+      ],
+      "id": "98629421-a577-4357-afdc-238fc2e08ca3",
+      "name": "Google Gemini Chat Model",
+      "credentials": {
+        "googlePalmApi": {
+          "id": "mjfBTQpnXYzvqLnn",
+          "name": "Google Gemini(PaLM) Api account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "toolDescription": "Use this tool to retrieve jokes",
+        "url": "https://v2.jokeapi.dev/joke/",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('parameters0_Name', ``, 'string') }}",
+              "value": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('parameters0_Value', ``, 'string') }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequestTool",
+      "typeVersion": 4.2,
+      "position": [
+        888,
+        -656
+      ],
+      "id": "97da25a4-b1cd-4804-9ee7-0924bf076aa6",
+      "name": "HTTP Request"
+    },
+    {
+      "parameters": {
+        "url": "https://data.alpaca.markets/v1beta3/crypto/us/snapshots",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpCustomAuth",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "symbols",
+              "value": "={{ $json.symbol.replace(/(USD)$/, '/$1') }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -816,
+        -756
+      ],
+      "id": "552e6ead-4a58-49e3-8fc4-f3716813c551",
+      "name": "Get Portfolio Asset Snapshots",
+      "alwaysOutputData": false,
+      "credentials": {
+        "oAuth2Api": {
+          "id": "gxoqknGoeXQJ2HXn",
+          "name": "TastyTrade Sandbox"
+        },
+        "httpCustomAuth": {
+          "id": "CkhrGpTfadRtqJJd",
+          "name": "Alpaca Paper Trading"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "c1c0cf9b-c4b6-4bd0-ab9b-8d7b6fc48261",
+              "leftValue": "={{ $('Generate Market API Orders').item.json }}",
+              "rightValue": "=[\n  {}\n]",
+              "operator": {
+                "type": "object",
+                "operation": "notEmpty",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        2000,
+        -756
+      ],
+      "id": "6bf89006-33dd-44e3-9b64-8274a1317d1a",
+      "name": "If a New Order Recommended"
     }
   ],
   "pinData": {},
   "connections": {
-    "Google Sheets Node": {
-      "main": [
-        [
-          {
-            "node": "Parse Current Holdings",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
     "Parse Current Holdings": {
       "main": [
         [
           {
-            "node": "DXFeed Portfolio Summary Node",
+            "node": "Filter Assets (Stocks)",
             "type": "main",
             "index": 0
           }
@@ -458,40 +864,7 @@
       "main": [
         [
           {
-            "node": "Portfolio Processing Node",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Code in JavaScript": {
-      "main": [
-        [
-          {
-            "node": "DXFeed Benchmark Summary Node",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "DXFeed Benchmark Summary Node": {
-      "main": [
-        [
-          {
-            "node": "Merge",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "DXFeed Portfolio Summary Node": {
-      "main": [
-        [
-          {
-            "node": "Merge",
+            "node": "AI Prompt Code",
             "type": "main",
             "index": 0
           }
@@ -502,7 +875,7 @@
       "main": [
         [
           {
-            "node": "AI Prompt Code",
+            "node": "Generate Market API Orders",
             "type": "main",
             "index": 0
           }
@@ -516,19 +889,25 @@
     },
     "AI Prompt Code": {
       "main": [
-        []
-      ]
-    },
-    "When clicking ‘Execute workflow’": {
-      "main": [
         [
           {
-            "node": "Code in JavaScript",
+            "node": "AI Agent",
             "type": "main",
             "index": 0
           },
           {
-            "node": "Google Sheets Node",
+            "node": "Merge",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Define Benchmark Tickers": {
+      "main": [
+        [
+          {
+            "node": "Market Data Benchmark Summary Node",
             "type": "main",
             "index": 0
           }
@@ -539,7 +918,234 @@
       "main": [
         [
           {
+            "node": "Parse AI Response and Merge",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse AI Response and Merge": {
+      "main": [
+        [
+          {
+            "node": "Portfolio Processing Node",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Consolidate Portfolio Updates": {
+      "main": [
+        [
+          {
+            "node": "Update Google Sheet with Latest Position",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Define Static Stop Losses": {
+      "main": [
+        [
+          {
+            "node": "Define Benchmark Tickers",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send message and wait for response": {
+      "main": [
+        [
+          {
+            "node": "Send Orders to API Service",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Current Holdings": {
+      "main": [
+        [
+          {
+            "node": "Parse Current Holdings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Market Data Benchmark Summary Node": {
+      "main": [
+        [
+          {
+            "node": "Get Account Snapshot",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Market API Orders": {
+      "main": [
+        [
+          {
+            "node": "If a New Order Recommended",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Account Snapshot": {
+      "main": [
+        [
+          {
             "node": "Data Ingestion Node",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Orders to API Service": {
+      "main": [
+        [
+          {
+            "node": "Get Recent Orders",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Recent Orders": {
+      "main": [
+        [
+          {
+            "node": "Get Account Snapshot for Sheet Update",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Current Holdings for Sheet Update": {
+      "main": [
+        [
+          {
+            "node": "Get All Fills",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Account Snapshot for Sheet Update": {
+      "main": [
+        [
+          {
+            "node": "Get Current Holdings for Sheet Update",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get All Fills": {
+      "main": [
+        [
+          {
+            "node": "Consolidate Portfolio Updates",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "Get Current Holdings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filter Assets (Stocks)": {
+      "main": [
+        [
+          {
+            "node": "Get Portfolio Asset Snapshots",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Agent": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Gemini Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Portfolio Asset Snapshots": {
+      "main": [
+        [
+          {
+            "node": "Define Static Stop Losses",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If a New Order Recommended": {
+      "main": [
+        [
+          {
+            "node": "Send message and wait for response",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Get Account Snapshot for Sheet Update",
             "type": "main",
             "index": 0
           }
@@ -547,15 +1153,17 @@
       ]
     }
   },
-  "active": false,
+  "active": true,
   "settings": {
-    "executionOrder": "v1"
+    "executionOrder": "v0",
+    "callerPolicy": "workflowsFromSameOwner",
+    "errorWorkflow": "eTYFSiofs6QxQrxN"
   },
-  "versionId": "5ff80dc3-f789-4714-bfc3-d21227ee92da",
+  "versionId": "bc881353-13d3-4274-b3fd-634c071f74cd",
   "meta": {
     "templateCredsSetupCompleted": true,
     "instanceId": "2ceb8b6526d90862aa73781ca6b69e51ed8d9a324424d4952a7562b1e0d83c34"
   },
-  "id": "zfpUbEMzs7CMh9CG",
+  "id": "lrvCqUYKbNXNKHZT",
   "tags": []
 }

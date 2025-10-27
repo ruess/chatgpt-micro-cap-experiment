@@ -1,151 +1,198 @@
-// Extract data from n8n input array
-const items = $input.all();
+try {
+    // Helper functions
+    function safeFloat(value, defaultValue = 0.0) {
+        if (value === null || value === undefined || value === '') {
+            return defaultValue;
+        }
+        const parsed = parseFloat(value);
+        return isNaN(parsed) ? defaultValue : parsed;
+    }
 
-// Find the TOTAL row for cash and equity
-const totalRow = items.find(item => item.json.Ticker && item.json.Ticker.trim() === 'TOTAL');
+    function lastTradingDate(today = null) {
+        let dt = today ? new Date(today) : new Date();
+        dt.setHours(0, 0, 0, 0); // Normalize to start of day
 
-// Count active positions (HOLD actions, excluding TOTAL)
-const activePositions = items.filter(item => 
-  item.json.Ticker && 
-  item.json.Ticker.trim() !== 'TOTAL' && 
-  item.json.Action === 'HOLD'
-);
+        const dayOfWeek = dt.getDay(); // 0 is Sunday, 1 is Monday, ..., 6 is Saturday
 
-// Extract values - these DO exist in your TOTAL row
-const cash = totalRow ? (totalRow.json['Cash Balance'] || 0) : 0;
-const equity = totalRow ? (totalRow.json['Total Equity'] || 0) : 0;
-const positions = activePositions.length;
-// Use the portfolio date, not today's date
-const date = items[0]?.json.Date?.trim() || new Date().toISOString().split('T')[0];
+        if (dayOfWeek === 6) { // Saturday
+            dt.setDate(dt.getDate() - 1); // Friday
+        } else if (dayOfWeek === 0) { // Sunday
+            dt.setDate(dt.getDate() - 2); // Friday
+        }
+        return dt;
+    }
 
-// Calculate portfolio performance metrics
-const totalPnL = totalRow ? (totalRow.json.PnL || 0) : 0;
-const startingEquity = 10000; // Assuming $10k start
-const totalReturn = ((equity - startingEquity) / startingEquity * 100).toFixed(1);
+    function extractCurrentPortfolioForAI(currentHoldingsData, marketData, staticStopLossesMap = new Map(), initialCashBalance = 0.0) {
+        if (!currentHoldingsData || currentHoldingsData.length === 0) {
+            return { portfolio: [], cashBalance: 10000.0 }; // Default cash balance
+        }
 
-// Build enhanced holdings text with stop losses and allocation percentages
-const holdingsText = activePositions.map(item => {
-  const ticker = item.json.Ticker?.trim() || 'UNKNOWN';
-  const shares = item.json.Shares || 0;
-  const buyPrice = item.json['Buy Price'] || 0;
-  const currentPrice = item.json['Current Price'] || 0;
-  const stopLoss = item.json['Stop Loss'] || 0;
-  const pnl = item.json.PnL || 0;
-  const positionValue = currentPrice * shares;
-  const allocationPct = equity > 0 ? ((positionValue / equity) * 100).toFixed(1) : 0;
-  
-  return `${ticker}: ${shares} shares @ $${currentPrice} (Buy: $${buyPrice}, Stop: $${stopLoss}, P&L: $${pnl}, ${allocationPct}% allocation)`;
-}).join('\n') || 'No current holdings';
+        const todayIso = lastTradingDate().toISOString().slice(0, 10);
 
-// Build recent activity context (basic version - could be enhanced with historical data)
-const recentActivityText = `Portfolio up $${totalPnL} (${totalReturn}%) from cost basis\nCurrent Strategy: Holding micro-cap positions with stop losses`;
+        const portfolio = currentHoldingsData.map(holding => {
+            const ticker = String(holding.symbol || "").toUpperCase().trim();
+            const shares = safeFloat(holding.quantity || 0);
+            const buyPrice = safeFloat(holding.average_open_price || 0);
+            const costBasis = buyPrice * shares;
 
-const prompt = `You are a professional portfolio analyst. Here is your current portfolio state as of ${date}:
+            const stopLoss = safeFloat(staticStopLossesMap.get(ticker), 0.0);
+
+            const marketDataItem = marketData.find(m => String(m.Ticker || "").toUpperCase().trim() === ticker);
+            const currentPrice = safeFloat(marketDataItem?.Close || marketDataItem?.Mark || holding.current_close_price || buyPrice);
+            const totalValue = safeFloat(currentPrice * shares);
+            const pnl = safeFloat(totalValue - costBasis);
+
+            return {
+                ticker: ticker,
+                shares: shares,
+                buy_price: buyPrice,
+                cost_basis: costBasis,
+                stop_loss: stopLoss,
+                current_price: currentPrice,
+                total_value: totalValue,
+                pnl: pnl,
+                action: "HOLD",
+                unique_id: `${todayIso}${ticker}`
+            };
+        });
+
+        return { portfolio, cashBalance: initialCashBalance };
+    }
+
+    // 1. Input validation
+    const items = $input.all();
+    if (!items || items.length === 0 || !items[0].json) {
+        return [{ json: { error: "No input data received" } }];
+    }
+
+    const classifiedInput = items[0].json;
+
+    // 2. Type validation
+    if (classifiedInput.type !== "classified_data") {
+        return [{
+            json: {
+                error: `Expected classified_data, got: ${classifiedInput.type || 'unknown'}`,
+                received_data: classifiedInput
+            }
+        }];
+    }
+
+    // 3. Extract and validate data
+    const historicalPortfolio = Array.isArray(classifiedInput.historical_portfolio) ? classifiedInput.historical_portfolio : [];
+    const currentMarketData = Array.isArray(classifiedInput.current_market_data) ? classifiedInput.current_market_data : [];
+    const benchmarkData = Array.isArray(classifiedInput.benchmark_data) ? classifiedInput.benchmark_data : [];
+    const sp500Data = Array.isArray(classifiedInput.sp500_data) ? classifiedInput.sp500_data : [];
+    const currentCashBalanceFromInput = safeFloat(classifiedInput.current_cash_balance || 0.0);
+
+    // --- Retrieve and validate static stop-loss data ---
+    const staticData = $getWorkflowStaticData('global');
+    let staticStopLossesData = staticData.stopLossesMap || [];
+    if (!Array.isArray(staticStopLossesData)) {
+        staticStopLossesData = []; // Default to empty array if not an array
+    }
+    const staticStopLossesMap = new Map(staticStopLossesData);
+
+    // 4. Process data
+    const { portfolio: currentPortfolioData, cashBalance: currentCashBalance } = extractCurrentPortfolioForAI(historicalPortfolio, currentMarketData, staticStopLossesMap, currentCashBalanceFromInput);
+
+    const totalPortfolioValue = currentPortfolioData.reduce((sum, pos) => sum + pos.total_value, 0);
+    const totalEquity = totalPortfolioValue + currentCashBalance;
+    const totalPnLFromCostBasis = currentPortfolioData.reduce((sum, pos) => sum + pos.pnl, 0);
+    const startingEquity = 10000;
+    const totalReturn = ((totalEquity - startingEquity) / startingEquity * 100).toFixed(1);
+    const activePositionsCount = currentPortfolioData.length;
+    const todayIso = lastTradingDate().toISOString().slice(0, 10);
+
+    const holdingsText = currentPortfolioData.map(item => {
+        const allocationPct = totalEquity > 0 ? ((item.total_value / totalEquity) * 100).toFixed(1) : 0;
+        return `${item.ticker}: ${item.shares} shares @ $${item.current_price.toFixed(2)} (Buy: $${item.buy_price.toFixed(2)}, Stop: $${item.stop_loss.toFixed(2)}, P&L: $${item.pnl.toFixed(2)}, ${allocationPct}% allocation)`;
+    }).join('\n') || 'No current holdings';
+
+    const recentActivityText = `Portfolio up $${totalPnLFromCostBasis.toFixed(2)} (${totalReturn}%) from cost basis\nCurrent Strategy: Holding micro-cap positions with stop losses`;
+
+    const prompt = `You are a professional portfolio analyst. Here is your current portfolio state as of ${todayIso}:
 
 [ Holdings ]
 ${holdingsText}
 
 [ Portfolio Performance ]
 Total Return: ${totalReturn}% since inception
-Cash Balance: $${cash.toLocaleString()}
-Total Equity: $${equity.toLocaleString()}
-Active Positions: ${positions}
+Cash Balance: $${currentCashBalance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+Total Equity: $${totalEquity.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+Active Positions: ${activePositionsCount}
 Portfolio Started: ~$${startingEquity.toLocaleString()}
 
 [ Recent Activity ]
 ${recentActivityText}
 
 Rules:
-- You have $${cash.toLocaleString()} in cash available for new positions
+- Please come up with at least 1 trade
+- You have $${currentCashBalance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} in cash available for new positions
 - Prefer U.S. micro-cap stocks (<$300M market cap)
 - Full shares only, no options or derivatives
 - Use stop-losses for risk management (current stops shown above)
 - Be conservative with position sizing (max 25% per position)
 - Consider liquidity for exit strategies
 
-Analyze the current market conditions, portfolio concentration, and stop-loss levels. Provide specific trading recommendations.
+Analyze the current market conditions, portfolio concentration, and stop-loss levels. Provide specific trading recommendations for the *next trading day*.
 
-Respond with ONLY a JSON object in this exact format:
+CRITICAL: You MUST respond with ONLY a valid JSON object. No explanations, no markdown, no additional text.
+
+JSON Format:
 {
     "analysis": "Brief market analysis and portfolio assessment",
     "trades": [
         {
             "action": "buy",
-            "ticker": "SYMBOL", 
+            "ticker": "SYMBOL",
             "shares": 100,
             "price": 25.50,
             "stop_loss": 20.00,
             "reason": "Brief rationale including market cap and liquidity assessment"
         }
     ],
-    "portfolio_adjustments": [
-        {
-            "action": "adjust_stop",
-            "ticker": "EXISTING_SYMBOL",
-            "new_stop_loss": 22.00,
-            "reason": "Brief rationale for stop adjustment"
-        }
-    ],
+    "portfolio_adjustments": [],
     "confidence": 0.8
-}
+}`;
 
-Only recommend trades you are confident about. If no trades are recommended, use empty arrays.`;
+    const currentPositionsForOutput = currentPortfolioData.map(item => ({
+        ticker: item.ticker,
+        shares: item.shares,
+        buy_price: item.buy_price,
+        current_price: item.current_price,
+        stop_loss: item.stop_loss,
+        pnl: item.pnl,
+        allocation_pct: totalEquity > 0 ? parseFloat(((item.total_value) / totalEquity * 100).toFixed(1)) : 0
+    }));
 
-// Build structured position data for programmatic access
-const currentPositions = activePositions.map(item => ({
-  ticker: item.json.Ticker?.trim() || 'UNKNOWN',
-  shares: item.json.Shares || 0,
-  buy_price: item.json['Buy Price'] || 0,
-  current_price: item.json['Current Price'] || 0,
-  stop_loss: item.json['Stop Loss'] || 0,
-  pnl: item.json.PnL || 0,
-  allocation_pct: equity > 0 ? parseFloat(((item.json['Current Price'] * item.json.Shares) / equity * 100).toFixed(1)) : 0
-}));
-
-return {
-  json: {
-    prompt: prompt,
-    cash_balance: cash,
-    total_equity: equity,
-    active_positions: positions,
-    date: date,
-    portfolio_performance: {
-      total_return_pct: parseFloat(totalReturn),
-      total_pnl: totalPnL,
-      starting_equity: startingEquity
-    },
-    current_positions: currentPositions
-  }
-};
-
-// Validation function for AI responses
-function validateAIResponse(response, currentPositions) {
-    const validation = {
-        valid: true,
-        warnings: [],
-        errors: []
-    };
-    
-    // Validate stop-loss adjustments
-    response.portfolio_adjustments?.forEach(adj => {
-        if (adj.action === 'adjust_stop') {
-            const position = currentPositions.find(p => p.ticker === adj.ticker);
-            if (!position) {
-                validation.errors.push(`Stop adjustment for unknown ticker: ${adj.ticker}`);
-                validation.valid = false;
-            } else if (adj.new_stop_loss >= position.current_price) {
-                validation.warnings.push(`New stop-loss for ${adj.ticker} ($${adj.new_stop_loss}) is above current price ($${position.current_price})`);
-            }
+    // 5. Return as array
+    return [{
+        json: {
+            prompt: prompt,
+            cash_balance: currentCashBalance,
+            total_equity: totalEquity,
+            active_positions: activePositionsCount,
+            date: todayIso,
+            portfolio_performance: {
+                total_return_pct: parseFloat(totalReturn),
+                total_pnl: totalPnLFromCostBasis,
+                starting_equity: startingEquity
+            },
+            current_positions: currentPositionsForOutput,
+            historical_portfolio: historicalPortfolio,
+            current_market_data: currentMarketData,
+            benchmark_data: benchmarkData,
+            sp500_data: sp500Data,
+            holdings_summary_text: holdingsText
         }
-    });
-    
-    // Validate trades
-    response.trades?.forEach(trade => {
-        if (trade.action === 'buy' && trade.price <= 0) {
-            validation.errors.push(`Invalid price for ${trade.ticker}: $${trade.price}`);
-            validation.valid = false;
+    }];
+
+} catch (error) {
+    return [{
+        json: {
+            error: "Script execution failed",
+            message: error.message,
+            stack: error.stack
         }
-    });
-    
-    return validation;
+    }];
 }
